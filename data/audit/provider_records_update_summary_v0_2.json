@@ -1,0 +1,235 @@
+{
+  "source_jsonl": "provider_records_adult_relevant(1).jsonl",
+  "record_count": 1043,
+  "field_count": 42,
+  "parse_errors": 0,
+  "service_area_counts": {
+    "SA 1": 95,
+    "SA 2": 153,
+    "SA 3": 187,
+    "SA 4": 153,
+    "SA 5": 76,
+    "SA 6": 132,
+    "SA 7": 96,
+    "SA 8": 151
+  },
+  "duplicate_facility_name_address_groups": 5,
+  "duplicate_facility_name_address_records": 10,
+  "mapbox_ready_records": 0,
+  "needs_geocoding_records": 1043,
+  "insurance_acceptance_verified_counts": {
+    "no": 1043
+  },
+  "field_completeness": [
+    {
+      "field": "accepting_status",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "accepting_status_meaning",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "access_mode",
+      "non_empty": 846,
+      "percent": 81.1
+    },
+    {
+      "field": "ada_facility",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "address",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "adult_status",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "age_groups",
+      "non_empty": 849,
+      "percent": 81.4
+    },
+    {
+      "field": "ca_licenses",
+      "non_empty": 894,
+      "percent": 85.7
+    },
+    {
+      "field": "care_setting",
+      "non_empty": 934,
+      "percent": 89.5
+    },
+    {
+      "field": "city",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "coverage_pathway",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "email",
+      "non_empty": 443,
+      "percent": 42.5
+    },
+    {
+      "field": "facility_name",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "hours",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "insurance_acceptance_verified",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "languages",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "methods_of_delivery",
+      "non_empty": 783,
+      "percent": 75.1
+    },
+    {
+      "field": "npi_numbers",
+      "non_empty": 925,
+      "percent": 88.7
+    },
+    {
+      "field": "operation",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "payer_context",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "phone",
+      "non_empty": 910,
+      "percent": 87.2
+    },
+    {
+      "field": "plan_specific_acceptance",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "practice_focus_terms",
+      "non_empty": 870,
+      "percent": 83.4
+    },
+    {
+      "field": "practitioner_count",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "practitioner_disciplines",
+      "non_empty": 925,
+      "percent": 88.7
+    },
+    {
+      "field": "practitioner_names",
+      "non_empty": 925,
+      "percent": 88.7
+    },
+    {
+      "field": "practitioners",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "programs_info",
+      "non_empty": 849,
+      "percent": 81.4
+    },
+    {
+      "field": "provider_display_name",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "rag_text",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "record_id",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "record_type",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "service_area",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "service_area_number",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "services",
+      "non_empty": 669,
+      "percent": 64.1
+    },
+    {
+      "field": "site_code",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "source_file",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "source_page_end",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "source_page_start",
+      "non_empty": 1043,
+      "percent": 100.0
+    },
+    {
+      "field": "special_population",
+      "non_empty": 761,
+      "percent": 73.0
+    },
+    {
+      "field": "website",
+      "non_empty": 857,
+      "percent": 82.2
+    },
+    {
+      "field": "zip_code",
+      "non_empty": 1043,
+      "percent": 100.0
+    }
+  ]
+}
