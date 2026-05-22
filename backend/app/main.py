@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
+
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 from .data_loader import load_provider_records, provider_records_by_uid
 from .geocode import LocationGeocodingError, geocode_location
@@ -12,6 +15,15 @@ app = FastAPI(
     title="AccessFirst GIS Facility Finder API",
     version="0.1.0",
     description="Search LA County mental health provider records using pre-geocoded Mapbox data.",
+)
+
+frontend_origin = os.getenv("MAP_FRONTEND_BASE_URL", "http://localhost:5173").rstrip("/")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[frontend_origin, "http://127.0.0.1:5173", "http://localhost:5173"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
 )
 
 
