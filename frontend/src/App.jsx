@@ -1,6 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import mapboxgl from 'mapbox-gl'
-import { initialFiltersFromUrl, searchFacilities, syncFiltersToUrl } from './lib/api.js'
+import {
+  getFacility,
+  initialFacilityLinkFromUrl,
+  initialFiltersFromUrl,
+  searchFacilities,
+  syncFiltersToUrl,
+} from './lib/api.js'
 
 const LOS_ANGELES_CENTER = [-118.2437, 34.0522]
 
@@ -10,6 +16,8 @@ export default function App() {
   const [selectedFacilityUid, setSelectedFacilityUid] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
+  const [mapReady, setMapReady] = useState(false)
+  const facilityLinkRef = useRef(initialFacilityLinkFromUrl())
   const mapContainerRef = useRef(null)
   const mapRef = useRef(null)
   const markersRef = useRef([])
@@ -33,10 +41,20 @@ export default function App() {
     })
     mapRef.current.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right')
     mapRef.current.addControl(new mapboxgl.ScaleControl({ unit: 'imperial' }), 'bottom-right')
+    mapRef.current.on('load', () => setMapReady(true))
   }, [])
 
   useEffect(() => {
-    if (filters.location) {
+    const facilityLink = facilityLinkRef.current
+    if (facilityLink.facility_uid && filters.location) {
+      runSearch(filters, {
+        syncUrl: false,
+        selectFacilityUid: facilityLink.facility_uid,
+        fallbackFacilityLink: facilityLink,
+      })
+    } else if (facilityLink.facility_uid) {
+      loadFacilityLink(facilityLink)
+    } else if (filters.location) {
       runSearch(filters)
     }
   }, [])
@@ -51,13 +69,13 @@ export default function App() {
       originMarkerRef,
       onSelect: setSelectedFacilityUid,
     })
-  }, [results, response?.origin, selectedFacility?.facility_uid])
+  }, [results, response?.origin, selectedFacility?.facility_uid, mapReady])
 
   function updateFilter(key, value) {
     setFilters((current) => ({ ...current, [key]: value }))
   }
 
-  async function runSearch(nextFilters) {
+  async function runSearch(nextFilters, options = {}) {
     if (!nextFilters.location.trim()) {
       setError('Enter a location to search nearby facilities.')
       setResponse(null)
@@ -67,16 +85,71 @@ export default function App() {
     const controller = new AbortController()
     setIsLoading(true)
     setError('')
-    syncFiltersToUrl(nextFilters)
+    if (options.syncUrl !== false) {
+      syncFiltersToUrl(nextFilters)
+    }
 
     try {
       const data = await searchFacilities(nextFilters, controller.signal)
+      const requestedFacilityUid = options.selectFacilityUid
+      const matchedFacility = requestedFacilityUid
+        ? data.results?.find((facility) => facility.facility_uid === requestedFacilityUid)
+        : null
+
       setResponse(data)
-      setSelectedFacilityUid(data.results?.[0]?.facility_uid || null)
+      if (matchedFacility) {
+        setSelectedFacilityUid(matchedFacility.facility_uid)
+      } else if (requestedFacilityUid && options.fallbackFacilityLink) {
+        await loadFacilityLink(options.fallbackFacilityLink, {
+          fallbackOrigin: data.origin,
+          fallbackOriginPlaceName: data.origin_place_name,
+        })
+      } else {
+        setSelectedFacilityUid(data.results?.[0]?.facility_uid || null)
+      }
     } catch (searchError) {
+      if (options.fallbackFacilityLink) {
+        await loadFacilityLink(options.fallbackFacilityLink)
+      } else {
+        setResponse(null)
+        setSelectedFacilityUid(null)
+        setError(searchError.message || 'Search failed.')
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function loadFacilityLink(facilityLink, options = {}) {
+    const controller = new AbortController()
+    setIsLoading(true)
+    setError('')
+
+    try {
+      const data = await getFacility(facilityLink.facility_uid, controller.signal)
+      const origin = originFromLink(facilityLink) || options.fallbackOrigin || null
+      const facility = facilityFromProviderRecord(data.record, {
+        facilityLink,
+        origin,
+      })
+
+      if (!facility) {
+        throw new Error('Facility was found, but it does not include usable coordinates.')
+      }
+
+      setResponse({
+        query: filters,
+        origin,
+        origin_place_name: options.fallbackOriginPlaceName || (origin ? 'Map link origin' : null),
+        count: 1,
+        message: 'Loaded facility from map link.',
+        results: [facility],
+      })
+      setSelectedFacilityUid(facility.facility_uid)
+    } catch (facilityError) {
       setResponse(null)
       setSelectedFacilityUid(null)
-      setError(searchError.message || 'Search failed.')
+      setError(facilityError.message || 'Facility link could not be loaded.')
     } finally {
       setIsLoading(false)
     }
@@ -246,7 +319,7 @@ function FacilityCard({ facility, rank, isSelected, onSelect }) {
       <span className="card-main">
         <span className="facility-name">{facility.facility_name || facility.provider_display_name}</span>
         <span className="facility-meta">
-          {facility.distance_miles} mi · {facility.city} {facility.zip_code}
+          {formatDistance(facility.distance_miles)} - {facility.city} {facility.zip_code}
         </span>
         <span className="facility-meta">{facility.care_setting || 'Care setting not listed'}</span>
         <span className="badge-row">
@@ -283,7 +356,7 @@ function DetailPanel({ facility, origin }) {
       <dl className="detail-grid">
         <div>
           <dt>Distance</dt>
-          <dd>{facility.distance_miles} miles</dd>
+          <dd>{formatDistance(facility.distance_miles)}</dd>
         </div>
         <div>
           <dt>Address</dt>
@@ -341,6 +414,101 @@ function NoticeState({ title, message }) {
       <p>{message}</p>
     </div>
   )
+}
+
+function facilityFromProviderRecord(record, { facilityLink, origin }) {
+  if (!record) return null
+
+  const mapbox = record.mapbox && typeof record.mapbox === 'object' ? record.mapbox : {}
+  const longitude = parseCoordinate(mapbox.longitude) ?? facilityLink.provider_lng
+  const latitude = parseCoordinate(mapbox.latitude) ?? facilityLink.provider_lat
+  if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
+    return null
+  }
+
+  const distance = origin
+    ? haversineMiles(origin.longitude, origin.latitude, longitude, latitude)
+    : null
+
+  return {
+    facility_uid: String(record.facility_uid || facilityLink.facility_uid),
+    facility_name: record.facility_name || null,
+    provider_display_name: record.provider_display_name || null,
+    service_area: record.service_area || null,
+    care_setting: record.care_setting || null,
+    address: record.address || null,
+    city: record.city || null,
+    zip_code: record.zip_code || null,
+    phone: record.phone || null,
+    website: record.website || null,
+    email: record.email || null,
+    hours: record.hours || null,
+    languages: Array.isArray(record.languages) ? record.languages : [],
+    services: Array.isArray(record.services) ? record.services : [],
+    methods_of_delivery: Array.isArray(record.methods_of_delivery) ? record.methods_of_delivery : [],
+    ada_facility: record.ada_facility || null,
+    accepting_status: record.accepting_status || null,
+    insurance_acceptance_verified: record.insurance_acceptance_verified || null,
+    insurance_note: insuranceNote(record),
+    longitude,
+    latitude,
+    distance_miles: distance === null ? null : Number(distance.toFixed(2)),
+    score: 0,
+    map_inclusion_status: mapbox.map_inclusion_status || null,
+    map_inclusion_reason: mapbox.map_inclusion_reason || null,
+    geocode_quality_status: mapbox.geocode_quality_status || null,
+    geography_status: mapbox.geography_status || null,
+    interactive_map_url: window.location.href,
+  }
+}
+
+function originFromLink(facilityLink) {
+  if (!Number.isFinite(facilityLink.origin_lng) || !Number.isFinite(facilityLink.origin_lat)) {
+    return null
+  }
+  return {
+    longitude: facilityLink.origin_lng,
+    latitude: facilityLink.origin_lat,
+  }
+}
+
+function parseCoordinate(value) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function insuranceNote(record) {
+  if (String(record.insurance_acceptance_verified || '').toLowerCase() === 'yes') {
+    return null
+  }
+  return 'Insurance acceptance is not verified in the source data; call to confirm coverage.'
+}
+
+function formatDistance(distanceMiles) {
+  const distance = Number(distanceMiles)
+  if (!Number.isFinite(distance)) {
+    return 'Distance not calculated'
+  }
+  return `${distance} mi`
+}
+
+function haversineMiles(originLongitude, originLatitude, destinationLongitude, destinationLatitude) {
+  const earthRadiusMiles = 3958.7613
+  const originLatRad = toRadians(originLatitude)
+  const destinationLatRad = toRadians(destinationLatitude)
+  const deltaLat = toRadians(destinationLatitude - originLatitude)
+  const deltaLng = toRadians(destinationLongitude - originLongitude)
+  const a = (
+    Math.sin(deltaLat / 2) ** 2
+    + Math.cos(originLatRad)
+    * Math.cos(destinationLatRad)
+    * Math.sin(deltaLng / 2) ** 2
+  )
+  return earthRadiusMiles * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+function toRadians(value) {
+  return value * Math.PI / 180
 }
 
 function renderMapResults({ map, results, origin, selectedFacilityUid, markersRef, originMarkerRef, onSelect }) {

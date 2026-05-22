@@ -16,6 +16,17 @@ export function initialFiltersFromUrl() {
   }
 }
 
+export function initialFacilityLinkFromUrl() {
+  const params = new URLSearchParams(window.location.search)
+  return {
+    facility_uid: params.get('facility_uid') || '',
+    provider_lng: parseOptionalNumber(params.get('provider_lng')),
+    provider_lat: parseOptionalNumber(params.get('provider_lat')),
+    origin_lng: parseOptionalNumber(params.get('origin_lng')),
+    origin_lat: parseOptionalNumber(params.get('origin_lat')),
+  }
+}
+
 export function syncFiltersToUrl(filters) {
   const params = new URLSearchParams()
   setParam(params, 'location', filters.location)
@@ -72,6 +83,20 @@ export async function searchFacilities(filters, signal) {
   return response.json()
 }
 
+export async function getFacility(facilityUid, signal) {
+  const response = await fetch(`${API_BASE_URL}/facility/${encodeURIComponent(facilityUid)}`, {
+    method: 'GET',
+    signal,
+  })
+
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}))
+    throw new Error(errorBody.detail || `Facility lookup failed with HTTP ${response.status}`)
+  }
+
+  return response.json()
+}
+
 function setParam(params, key, value) {
   if (value !== null && value !== undefined && String(value).trim() !== '') {
     params.set(key, String(value))
@@ -92,4 +117,10 @@ function parseTelehealth(value) {
 
 function emptyToNull(value) {
   return value && String(value).trim() ? String(value).trim() : null
+}
+
+function parseOptionalNumber(value) {
+  if (value === null || value === '') return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
 }
