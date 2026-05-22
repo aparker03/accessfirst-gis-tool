@@ -1,0 +1,229 @@
+openapi: 3.0.3
+info:
+  title: AccessFirst GIS Facility Search
+  version: 0.1.0
+  description: >
+    Minimal Dify-compatible schema for searching nearby AccessFirst provider
+    facilities. Use this tool for nearby facility search, addresses, distance,
+    service-type filtering, language filtering, accessibility filtering,
+    facility recommendations, and map handoff links. Directions and map
+    interaction are handled in each result's interactive_map_url. Insurance
+    acceptance is not verified unless the returned insurance_acceptance_verified
+    field explicitly says yes. Do not use this tool for crisis response; crisis
+    routing should stay in the Dify chatflow.
+servers:
+  - url: https://accessfirst-gis-tool.onrender.com
+paths:
+  /search-facilities:
+    post:
+      operationId: searchFacilities
+      summary: Search nearby AccessFirst facilities
+      description: >
+        Search for nearby facilities from a user-provided location. The tool can
+        rank by distance, service type, language, accessibility needs, and
+        telehealth preference. Return interactive_map_url to hand the user to the
+        map interface for directions and map interaction. Do not claim insurance
+        acceptance unless insurance_acceptance_verified explicitly says yes. Do
+        not use this endpoint for crisis response.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                location:
+                  type: string
+                  description: User search origin, such as an address, city, landmark, or ZIP code.
+                service_type:
+                  type: string
+                  description: Optional service need, such as therapy, medication support, outpatient care, anxiety, or crisis intervention.
+                language:
+                  type: string
+                  description: Optional language preference to match against listed facility languages.
+                accessibility_need:
+                  type: string
+                  description: Optional accessibility need, such as ADA, wheelchair access, or mobility access.
+                telehealth:
+                  type: boolean
+                  description: Optional telehealth preference. True favors phone, video, or telehealth delivery.
+                radius_miles:
+                  type: number
+                  default: 10
+                  description: Search radius in miles from the user location.
+                limit:
+                  type: integer
+                  default: 5
+                  description: Maximum number of ranked facility recommendations to return.
+                include_warning_results:
+                  type: boolean
+                  default: true
+                  description: Include map-ready results with geocode warnings when otherwise suitable.
+                include_manual_review:
+                  type: boolean
+                  default: false
+                  description: Include records that need manual geocode review. Keep false for normal user recommendations.
+                include_outside_la_county:
+                  type: boolean
+                  default: false
+                  description: Include records classified outside Los Angeles County. Keep false unless explicitly requested.
+              required:
+                - location
+      responses:
+        "200":
+          description: Ranked facility search results.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  query:
+                    type: object
+                    description: Request values used by the backend search.
+                    properties:
+                      location:
+                        type: string
+                      service_type:
+                        type: string
+                      language:
+                        type: string
+                      accessibility_need:
+                        type: string
+                      telehealth:
+                        type: boolean
+                      radius_miles:
+                        type: number
+                      limit:
+                        type: integer
+                      include_warning_results:
+                        type: boolean
+                      include_manual_review:
+                        type: boolean
+                      include_outside_la_county:
+                        type: boolean
+                  origin:
+                    type: object
+                    description: Geocoded user search origin used for distance calculations.
+                    properties:
+                      longitude:
+                        type: number
+                      latitude:
+                        type: number
+                  origin_place_name:
+                    type: string
+                    description: Place name for the geocoded user search origin.
+                  count:
+                    type: integer
+                    description: Number of facility results returned.
+                  message:
+                    type: string
+                    description: Human-readable search result message, including no-match messages.
+                  results:
+                    type: array
+                    description: Ranked facility recommendations with map handoff URLs.
+                    items:
+                      type: object
+                      properties:
+                        facility_uid:
+                          type: string
+                          description: Unique facility identifier.
+                        facility_name:
+                          type: string
+                          description: Facility or provider site name.
+                        provider_display_name:
+                          type: string
+                          description: Provider display name from source data.
+                        service_area:
+                          type: string
+                          description: LA County service area when listed.
+                        care_setting:
+                          type: string
+                          description: Facility care setting.
+                        address:
+                          type: string
+                          description: Facility address.
+                        city:
+                          type: string
+                          description: Facility city.
+                        zip_code:
+                          type: string
+                          description: Facility ZIP code.
+                        phone:
+                          type: string
+                          description: Facility phone number when listed.
+                        website:
+                          type: string
+                          description: Facility website when listed.
+                        hours:
+                          type: string
+                          description: Facility hours when listed.
+                        languages:
+                          type: array
+                          description: Languages listed for the facility.
+                          items:
+                            type: string
+                        services:
+                          type: array
+                          description: Services listed for the facility.
+                          items:
+                            type: string
+                        methods_of_delivery:
+                          type: array
+                          description: Delivery methods such as in-person, telephone, or telehealth when listed.
+                          items:
+                            type: string
+                        ada_facility:
+                          type: string
+                          description: ADA facility value from source data when listed.
+                        accepting_status:
+                          type: string
+                          description: Source accepting status. This is not an insurance acceptance claim.
+                        insurance_acceptance_verified:
+                          type: string
+                          description: Insurance acceptance is not verified unless this field explicitly says yes.
+                        insurance_note:
+                          type: string
+                          description: Reminder about insurance verification limits.
+                        longitude:
+                          type: number
+                          description: Facility longitude from pre-geocoded provider data.
+                        latitude:
+                          type: number
+                          description: Facility latitude from pre-geocoded provider data.
+                        distance_miles:
+                          type: number
+                          description: Distance in miles from the user search origin.
+                        score:
+                          type: number
+                          description: Ranking score based on distance and requested filters.
+                        map_inclusion_status:
+                          type: string
+                          description: Map inclusion classification for this result.
+                        map_inclusion_reason:
+                          type: string
+                          description: Explanation for map inclusion status.
+                        geocode_quality_status:
+                          type: string
+                          description: Geocode quality classification.
+                        geography_status:
+                          type: string
+                          description: Geography classification, such as in_la_county or outside_la_county.
+                        interactive_map_url:
+                          type: string
+                          description: Map handoff URL. Directions and map interaction are handled in this URL.
+                required:
+                  - query
+                  - origin
+                  - count
+                  - message
+                  - results
+        "400":
+          description: Invalid request or location could not be geocoded.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+                    description: Error detail.
