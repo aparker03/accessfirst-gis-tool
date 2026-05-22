@@ -1,0 +1,453 @@
+openapi: 3.1.0
+info:
+  title: AccessFirst GIS Facility Finder API
+  version: 0.1.0
+  description: >
+    API schema for the AccessFirst Resource Navigator Agent. Use these tools to
+    search nearby mental health provider facilities, retrieve facility details,
+    hand off map URLs to users, compare distance from a searched location, and
+    filter by service type, language, accessibility needs, and telehealth
+    preference. Insurance acceptance is not verified unless a returned field
+    explicitly says it is verified.
+servers:
+  - url: https://YOUR-BACKEND-DOMAIN.example.com
+    description: Public FastAPI backend URL after deployment. Replace this placeholder before importing into Dify.
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Check API health and loaded provider count
+      description: >
+        Use this endpoint to confirm that the AccessFirst GIS backend is running
+        and has loaded the merged provider dataset.
+      responses:
+        "200":
+          description: Backend health status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /facility/{facility_uid}:
+    get:
+      operationId: getFacilityByUid
+      summary: Retrieve one facility record by facility_uid
+      description: >
+        Use this endpoint when the user asks for more detail about a specific
+        facility returned by search. The response contains the underlying provider
+        record as stored by AccessFirst. Do not infer unsupported fields or claim
+        insurance acceptance unless the record explicitly marks insurance
+        acceptance as verified.
+      parameters:
+        - name: facility_uid
+          in: path
+          required: true
+          description: Unique AccessFirst facility identifier from search results.
+          schema:
+            type: string
+            example: lacdmh-sa1-8422-1
+      responses:
+        "200":
+          description: Facility record found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FacilityResponse"
+        "404":
+          description: Facility not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /search-facilities:
+    post:
+      operationId: searchFacilities
+      summary: Search nearby AccessFirst facilities
+      description: >
+        Primary Resource Navigator search tool. Use this endpoint when a user
+        asks for nearby mental health facilities, facilities near an address,
+        map-ready options, driving or map handoff links, language availability,
+        accessibility-related filtering, telehealth preference, or service-type
+        matching. The backend geocodes only the user's search location, compares
+        distance against pre-geocoded provider records, ranks the results, and
+        returns an interactive_map_url for each facility. By default, results
+        exclude manual-review geocodes and outside-Los-Angeles-County records
+        unless the request explicitly opts into them. Insurance acceptance is not
+        verified unless the returned insurance_acceptance_verified field
+        explicitly says yes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchFacilitiesRequest"
+            examples:
+              nearbySpanish:
+                summary: Search for Spanish-language mental health facilities near Long Beach
+                value:
+                  location: Long Beach, CA
+                  service_type: mental health services
+                  language: Spanish
+                  accessibility_need: ADA
+                  telehealth: null
+                  radius_miles: 10
+                  limit: 5
+                  include_warning_results: true
+                  include_manual_review: false
+                  include_outside_la_county: false
+      responses:
+        "200":
+          description: Ranked facility search response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchFacilitiesResponse"
+        "400":
+          description: Search location could not be geocoded or request was invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          description: Backend status, normally "ok".
+          example: ok
+        provider_records_loaded:
+          type: integer
+          description: Number of provider records loaded from the merged dataset.
+          example: 1043
+      required:
+        - status
+        - provider_records_loaded
+    SearchFacilitiesRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        location:
+          type: string
+          minLength: 1
+          description: >
+            User search origin to geocode, such as an address, city, landmark, or
+            ZIP code. Required for nearby facility search and distance ranking.
+          example: Long Beach, CA
+        service_type:
+          type:
+            - string
+            - "null"
+          description: >
+            Optional service or need to rank against services, care setting,
+            methods, and practice focus terms, such as crisis intervention,
+            therapy, medication support, outpatient care, depression, or anxiety.
+          example: medication support
+        language:
+          type:
+            - string
+            - "null"
+          description: Optional language preference to rank facilities by listed languages.
+          example: Spanish
+        accessibility_need:
+          type:
+            - string
+            - "null"
+          description: >
+            Optional accessibility need, such as ADA, wheelchair access, or
+            mobility access. The backend uses listed ADA/accessibility fields only.
+          example: wheelchair access
+        telehealth:
+          type:
+            - boolean
+            - "null"
+          description: >
+            Optional telehealth preference. True favors phone/video/telehealth
+            delivery; false favors in-person options; null accepts any delivery type.
+          example: true
+        radius_miles:
+          type: number
+          exclusiveMinimum: 0
+          default: 10
+          description: Search radius in miles from the geocoded user location.
+          example: 10
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 10
+          description: Maximum number of ranked facilities to return.
+          example: 10
+        include_warning_results:
+          type: boolean
+          default: true
+          description: >
+            Include map-ready results with geocode warnings, such as city or ZIP
+            mismatch warnings where the address-level match is otherwise strong.
+          example: true
+        include_manual_review:
+          type: boolean
+          default: false
+          description: >
+            Include records that require manual geocode/address review. Keep false
+            for normal user-facing search unless the user explicitly asks to inspect
+            lower-confidence records.
+          example: false
+        include_outside_la_county:
+          type: boolean
+          default: false
+          description: >
+            Include records classified outside Los Angeles County. Keep false for
+            default LA County navigation unless the user explicitly asks for
+            outside-county records.
+          example: false
+      required:
+        - location
+    SearchFacilitiesResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        query:
+          $ref: "#/components/schemas/SearchFacilitiesRequest"
+        origin:
+          $ref: "#/components/schemas/Coordinates"
+        origin_place_name:
+          type:
+            - string
+            - "null"
+          description: Place name returned by Mapbox for the user's search location.
+          example: Long Beach, California, United States
+        count:
+          type: integer
+          description: Number of results returned in this response.
+          example: 5
+        message:
+          type: string
+          description: >
+            Human-readable search outcome. If no records match, this explains that
+            no facilities matched the requested filters and radius.
+          example: Found 5 matching facilities.
+        results:
+          type: array
+          description: Ranked facility results sorted by relevance and distance.
+          items:
+            $ref: "#/components/schemas/FacilitySearchResult"
+      required:
+        - query
+        - origin
+        - count
+        - message
+        - results
+    FacilitySearchResult:
+      type: object
+      additionalProperties: false
+      properties:
+        facility_uid:
+          type: string
+          description: Unique facility identifier for follow-up detail lookup.
+          example: lacdmh-sa8-7019F-899
+        facility_name:
+          type:
+            - string
+            - "null"
+          description: Facility or provider site name from source data.
+          example: CA MENTOR
+        provider_display_name:
+          type:
+            - string
+            - "null"
+          description: Display name from source data.
+        service_area:
+          type:
+            - string
+            - "null"
+          description: LA County service area label when listed.
+          example: SA 8
+        care_setting:
+          type:
+            - string
+            - "null"
+          description: Care setting from source data.
+          example: Outpatient Clinic Based Care
+        address:
+          type:
+            - string
+            - "null"
+          description: Facility address from source data.
+        city:
+          type:
+            - string
+            - "null"
+          description: Facility city from source data.
+        zip_code:
+          type:
+            - string
+            - "null"
+          description: Facility ZIP code from source data.
+        phone:
+          type:
+            - string
+            - "null"
+          description: Facility phone number when listed.
+        website:
+          type:
+            - string
+            - "null"
+          description: Facility website when listed.
+        email:
+          type:
+            - string
+            - "null"
+          description: Facility email when listed.
+        hours:
+          type:
+            - string
+            - "null"
+          description: Hours text from source data when listed.
+        languages:
+          type: array
+          description: Languages listed for the facility.
+          items:
+            type: string
+        services:
+          type: array
+          description: Services listed for the facility.
+          items:
+            type: string
+        methods_of_delivery:
+          type: array
+          description: Delivery methods listed for the facility, such as in-person or telephone.
+          items:
+            type: string
+        ada_facility:
+          type:
+            - string
+            - "null"
+          description: ADA facility value from source data when listed.
+        accepting_status:
+          type:
+            - string
+            - "null"
+          description: >
+            Source accepting status when listed. This is not an insurance acceptance
+            claim; users should call to confirm availability and eligibility.
+        insurance_acceptance_verified:
+          type:
+            - string
+            - "null"
+          description: >
+            Whether insurance acceptance was explicitly verified in the source
+            data. Do not claim insurance acceptance unless this field is yes.
+          example: "no"
+        insurance_note:
+          type:
+            - string
+            - "null"
+          description: >
+            Safety note reminding the agent/user that insurance acceptance is not
+            verified unless explicitly marked as verified.
+          example: Insurance acceptance is not verified in the source data; call to confirm coverage.
+        longitude:
+          type: number
+          description: Pre-geocoded provider longitude. The API does not geocode providers at search time.
+        latitude:
+          type: number
+          description: Pre-geocoded provider latitude. The API does not geocode providers at search time.
+        distance_miles:
+          type: number
+          description: Haversine distance in miles from the user's geocoded search origin.
+          example: 0.5
+        score:
+          type: number
+          description: Internal relevance score combining filters and distance.
+        map_inclusion_status:
+          type:
+            - string
+            - "null"
+          enum:
+            - include_default_map
+            - include_with_warning
+            - manual_review
+            - exclude_default_map
+            - null
+          description: Map inclusion classification for this facility.
+        map_inclusion_reason:
+          type:
+            - string
+            - "null"
+          description: Explanation for the map inclusion classification.
+        geocode_quality_status:
+          type:
+            - string
+            - "null"
+          enum:
+            - verified_address
+            - verified_city_or_zip_mismatch
+            - needs_review_address
+            - failed
+            - null
+          description: Address geocode quality classification.
+        geography_status:
+          type:
+            - string
+            - "null"
+          enum:
+            - in_la_county
+            - outside_la_county
+            - geography_uncertain
+            - null
+          description: Geography classification for LA County filtering.
+        interactive_map_url:
+          type: string
+          format: uri
+          description: >
+            Frontend map handoff URL for this ranked result, including facility
+            and origin coordinates for the AccessFirst map interface.
+      required:
+        - facility_uid
+        - longitude
+        - latitude
+        - distance_miles
+        - score
+        - interactive_map_url
+    Coordinates:
+      type: object
+      additionalProperties: false
+      properties:
+        longitude:
+          type: number
+          example: -118.1937
+        latitude:
+          type: number
+          example: 33.7701
+      required:
+        - longitude
+        - latitude
+    FacilityResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        facility_uid:
+          type: string
+          description: Unique AccessFirst facility identifier.
+        record:
+          type: object
+          description: >
+            Full provider record from the AccessFirst merged provider dataset.
+            Use only fields present in this record; do not invent facility details
+            or unsupported insurance acceptance claims.
+          additionalProperties: true
+      required:
+        - facility_uid
+        - record
+    ErrorResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        detail:
+          description: Error detail string or object returned by FastAPI.
+          oneOf:
+            - type: string
+            - type: object
+              additionalProperties: true
