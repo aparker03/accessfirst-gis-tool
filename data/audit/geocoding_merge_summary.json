@@ -1,0 +1,14 @@
+{
+  "exclude_default_map": 28,
+  "failed_geocodes": 1,
+  "geocode_rows": 1043,
+  "geojson_feature_count": 921,
+  "include_default_map": 913,
+  "include_with_warning": 8,
+  "manual_review": 94,
+  "mapbox_ready_records": 921,
+  "matched_geocode_rows": 1043,
+  "missing_geocode_rows": 0,
+  "outside_la_county": 27,
+  "total_provider_records": 1043
+}
