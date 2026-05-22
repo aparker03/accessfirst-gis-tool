@@ -10,7 +10,7 @@ info:
     preference. Insurance acceptance is not verified unless a returned field
     explicitly says it is verified.
 servers:
-  - url: https://YOUR-BACKEND-DOMAIN.example.com
+  - url: https://accessfirst-gis-tool.onrender.com
     description: Public FastAPI backend URL after deployment. Replace this placeholder before importing into Dify.
 paths:
   /health:
