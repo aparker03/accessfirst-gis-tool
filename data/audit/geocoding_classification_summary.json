@@ -1,0 +1,24 @@
+{
+  "excluded_records": 28,
+  "geocode_quality_status": {
+    "failed": 1,
+    "needs_review_address": 98,
+    "verified_address": 936,
+    "verified_city_or_zip_mismatch": 8
+  },
+  "geography_status": {
+    "in_la_county": 1016,
+    "outside_la_county": 27
+  },
+  "include_default_map_records": 913,
+  "include_with_warning_records": 8,
+  "manual_review_records": 94,
+  "map_inclusion_status": {
+    "exclude_default_map": 28,
+    "include_default_map": 913,
+    "include_with_warning": 8,
+    "manual_review": 94
+  },
+  "outside_la_county_records": 27,
+  "total_records": 1043
+}
