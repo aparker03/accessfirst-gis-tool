@@ -26,6 +26,9 @@ export default function App() {
   const [filters, setFilters] = useState(() => initialFiltersFromUrl())
   const [response, setResponse] = useState(null)
   const [selectedFacilityUid, setSelectedFacilityUid] = useState(null)
+  const [selectedFacilityRecord, setSelectedFacilityRecord] = useState(null)
+  const [isDetailLoading, setIsDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
   const [mapReady, setMapReady] = useState(false)
@@ -83,6 +86,44 @@ export default function App() {
     })
   }, [results, response?.origin, selectedFacility?.facility_uid, mapReady])
 
+  useEffect(() => {
+    if (!selectedFacility?.facility_uid) {
+      setSelectedFacilityRecord(null)
+      setIsDetailLoading(false)
+      setDetailError('')
+      return
+    }
+
+    const controller = new AbortController()
+    let isActive = true
+
+    setSelectedFacilityRecord((current) => (
+      current?.facility_uid === selectedFacility.facility_uid ? current : null
+    ))
+    setIsDetailLoading(true)
+    setDetailError('')
+
+    getFacility(selectedFacility.facility_uid, controller.signal)
+      .then((data) => {
+        if (isActive) {
+          setSelectedFacilityRecord(data.record || null)
+        }
+      })
+      .catch((detailFetchError) => {
+        if (!isActive || detailFetchError.name === 'AbortError') return
+        setSelectedFacilityRecord(null)
+        setDetailError(detailFetchError.message || 'Facility details could not be loaded.')
+      })
+      .finally(() => {
+        if (isActive) setIsDetailLoading(false)
+      })
+
+    return () => {
+      isActive = false
+      controller.abort()
+    }
+  }, [selectedFacility?.facility_uid])
+
   function updateFilter(key, value) {
     setFilters((current) => ({ ...current, [key]: value }))
   }
@@ -91,6 +132,8 @@ export default function App() {
     setFilters(DEFAULT_FILTERS)
     setResponse(null)
     setSelectedFacilityUid(null)
+    setSelectedFacilityRecord(null)
+    setDetailError('')
     setError('')
     window.history.replaceState(null, '', window.location.pathname)
   }
@@ -105,6 +148,8 @@ export default function App() {
     const controller = new AbortController()
     setIsLoading(true)
     setError('')
+    setSelectedFacilityRecord(null)
+    setDetailError('')
     if (options.syncUrl !== false) {
       syncFiltersToUrl(nextFilters)
     }
@@ -144,6 +189,7 @@ export default function App() {
     const controller = new AbortController()
     setIsLoading(true)
     setError('')
+    setDetailError('')
 
     try {
       const data = await getFacility(facilityLink.facility_uid, controller.signal)
@@ -166,9 +212,11 @@ export default function App() {
         results: [facility],
       })
       setSelectedFacilityUid(facility.facility_uid)
+      setSelectedFacilityRecord(data.record || null)
     } catch (facilityError) {
       setResponse(null)
       setSelectedFacilityUid(null)
+      setSelectedFacilityRecord(null)
       setError(facilityError.message || 'Facility link could not be loaded.')
     } finally {
       setIsLoading(false)
@@ -340,7 +388,13 @@ export default function App() {
               </div>
             )}
           </div>
-          <DetailPanel facility={selectedFacility} origin={response?.origin_place_name} />
+          <DetailPanel
+            facility={selectedFacility}
+            origin={response?.origin_place_name}
+            providerRecord={selectedFacilityRecord}
+            isDetailLoading={isDetailLoading}
+            detailError={detailError}
+          />
         </section>
       </section>
     </main>
@@ -379,7 +433,7 @@ function FacilityCard({ facility, rank, isSelected, onSelect }) {
   )
 }
 
-function DetailPanel({ facility, origin }) {
+function DetailPanel({ facility, origin, providerRecord, isDetailLoading, detailError }) {
   if (!facility) {
     return (
       <aside className="detail-panel empty" aria-label="Facility details">
@@ -388,6 +442,10 @@ function DetailPanel({ facility, origin }) {
       </aside>
     )
   }
+
+  const focusAreas = sourceList(providerRecord?.practice_focus_terms)
+  const disciplines = sourceList(providerRecord?.practitioner_disciplines)
+  const practitioners = practitionerList(providerRecord)
 
   return (
     <aside className="detail-panel" aria-label="Facility details">
@@ -442,6 +500,22 @@ function DetailPanel({ facility, origin }) {
         </section>
 
         <section>
+          <h3>Focus areas</h3>
+          <SourceList values={focusAreas} isLoading={isDetailLoading && !providerRecord} error={detailError} />
+        </section>
+
+        <section>
+          <h3>Provider disciplines</h3>
+          <SourceList values={disciplines} isLoading={isDetailLoading && !providerRecord} error={detailError} />
+        </section>
+
+        <PractitionerSection
+          practitioners={practitioners}
+          isLoading={isDetailLoading && !providerRecord}
+          error={detailError}
+        />
+
+        <section>
           <h3>Location quality</h3>
           <p>{mapStatusLabel(facility)}</p>
           <p className="muted-text">{facility.map_inclusion_reason || 'Map location reviewed.'}</p>
@@ -469,6 +543,81 @@ function DetailPanel({ facility, origin }) {
         </section>
       </div>
     </aside>
+  )
+}
+
+function SourceList({ values, isLoading, error }) {
+  if (isLoading) {
+    return <p className="muted-text">Loading source directory details.</p>
+  }
+  if (error) {
+    return <p className="muted-text">Source directory details could not be loaded.</p>
+  }
+  if (!values.length) {
+    return <p className="muted-text">Not listed in the source record.</p>
+  }
+  return (
+    <div className="chip-list" aria-label="Source directory values">
+      {values.map((value) => (
+        <span className="chip" key={value}>{value}</span>
+      ))}
+    </div>
+  )
+}
+
+function PractitionerSection({ practitioners, isLoading, error }) {
+  return (
+    <section>
+      <h3>Practitioners listed in source directory</h3>
+      <p className="source-note">
+        Practitioner listings come from the source provider directory and may not reflect current availability. Call to confirm.
+      </p>
+      {isLoading && <p className="muted-text">Loading source directory details.</p>}
+      {!isLoading && error && <p className="muted-text">Source directory details could not be loaded.</p>}
+      {!isLoading && !error && !practitioners.length && (
+        <p className="muted-text">Not listed in the source record.</p>
+      )}
+      {!isLoading && !error && practitioners.length > 0 && (
+        <details className="practitioner-accordion">
+          <summary>Show practitioner details ({practitioners.length})</summary>
+          <div className="practitioner-list">
+            {practitioners.map((practitioner, index) => (
+              <article className="practitioner-card" key={`${practitioner.practitioner_name || 'practitioner'}-${index}`}>
+                {practitioner.practitioner_name && (
+                  <h4>{practitioner.practitioner_name}</h4>
+                )}
+                <dl>
+                  {practitioner.discipline && (
+                    <div>
+                      <dt>Discipline</dt>
+                      <dd>{practitioner.discipline}</dd>
+                    </div>
+                  )}
+                  {practitioner.practice_focus && (
+                    <div>
+                      <dt>Practice focus</dt>
+                      <dd>{practitioner.practice_focus}</dd>
+                    </div>
+                  )}
+                  {practitioner.npi_number && (
+                    <div>
+                      <dt>NPI</dt>
+                      <dd>{practitioner.npi_number}</dd>
+                    </div>
+                  )}
+                  {practitioner.ca_license && (
+                    <div>
+                      <dt>CA license</dt>
+                      <dd>{practitioner.ca_license}</dd>
+                    </div>
+                  )}
+                </dl>
+              </article>
+            ))}
+          </div>
+        </details>
+      )}
+    </section>
   )
 }
 
@@ -715,6 +864,53 @@ function resultSummary(response, isLoading, error) {
   if (error) return 'Unable to complete search'
   if (!response) return 'Awaiting search'
   return `${response.count} facilities ranked`
+}
+
+function sourceList(value) {
+  const values = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(';')
+      : []
+  return Array.from(new Set(
+    values
+      .map((item) => String(item || '').trim())
+      .filter(Boolean),
+  ))
+}
+
+function practitionerList(record) {
+  if (!record) return []
+
+  if (Array.isArray(record.practitioners) && record.practitioners.length) {
+    return record.practitioners
+      .map((practitioner) => cleanPractitioner({
+        practitioner_name: practitioner.practitioner_name,
+        discipline: practitioner.discipline,
+        practice_focus: sourceList(practitioner.practice_focus).join(', ') || practitioner.practice_focus,
+        npi_number: practitioner.npi_number,
+        ca_license: practitioner.ca_license,
+      }))
+      .filter((practitioner) => Object.values(practitioner).some(Boolean))
+  }
+
+  const names = sourceList(record.practitioner_names)
+  const npiNumbers = sourceList(record.npi_numbers)
+  const caLicenses = sourceList(record.ca_licenses)
+
+  return names
+    .map((name, index) => cleanPractitioner({
+      practitioner_name: name,
+      npi_number: npiNumbers[index],
+      ca_license: caLicenses[index],
+    }))
+    .filter((practitioner) => Object.values(practitioner).some(Boolean))
+}
+
+function cleanPractitioner(practitioner) {
+  return Object.fromEntries(
+    Object.entries(practitioner).map(([key, value]) => [key, String(value || '').trim()]),
+  )
 }
 
 function listText(values) {
