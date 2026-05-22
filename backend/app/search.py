@@ -67,6 +67,7 @@ def insurance_note(record: dict[str, Any]) -> str | None:
 
 def facility_result(
     record: dict[str, Any],
+    request: SearchRequest,
     distance_miles: float,
     score: float,
     origin_longitude: float,
@@ -114,6 +115,7 @@ def facility_result(
             latitude,
             origin_longitude,
             origin_latitude,
+            request,
         ),
     )
 
@@ -147,6 +149,6 @@ def search_facilities(
 
     candidates.sort(key=lambda item: (-item[0], item[1], str(item[2].get("facility_name", ""))))
     return [
-        facility_result(record, distance, score, origin_longitude, origin_latitude)
+        facility_result(record, request, distance, score, origin_longitude, origin_latitude)
         for score, distance, record in candidates[: request.limit]
     ]
