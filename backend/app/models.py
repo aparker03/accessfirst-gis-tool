@@ -23,6 +23,18 @@ class SearchRequest(BaseModel):
     include_outside_la_county: bool = False
 
 
+class LocationValidationRequest(BaseModel):
+    location: str = Field(..., min_length=1)
+
+
+class LocationValidationResponse(BaseModel):
+    input: str
+    is_valid_zip: Optional[bool] = None
+    is_la_county: Optional[bool] = None
+    normalized_location: str
+    reason: str
+
+
 class Coordinates(BaseModel):
     longitude: float
     latitude: float
@@ -43,11 +55,19 @@ class FacilityResult(BaseModel):
     hours: Optional[str] = None
     languages: list[str] = Field(default_factory=list)
     services: list[str] = Field(default_factory=list)
+    service_summary: Optional[str] = None
     methods_of_delivery: list[str] = Field(default_factory=list)
+    delivery_summary: Optional[str] = None
     ada_facility: Optional[str] = None
     accepting_status: Optional[str] = None
     insurance_acceptance_verified: Optional[str] = None
     insurance_note: Optional[str] = None
+    practice_focus_summary: Optional[str] = None
+    practitioner_summary: Optional[str] = None
+    practitioner_count: Optional[int] = None
+    practitioner_disciplines: list[str] = Field(default_factory=list)
+    has_practitioner_names: bool = False
+    has_npi_or_license_details: bool = False
     longitude: float
     latitude: float
     distance_miles: float

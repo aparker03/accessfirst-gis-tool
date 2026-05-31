@@ -7,7 +7,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .data_loader import load_provider_records, provider_records_by_uid
 from .geocode import LocationGeocodingError, geocode_location
-from .models import Coordinates, FacilityResponse, HealthResponse, SearchRequest, SearchResponse
+from .location_validation import validate_location
+from .models import (
+    Coordinates,
+    FacilityResponse,
+    HealthResponse,
+    LocationValidationRequest,
+    LocationValidationResponse,
+    SearchRequest,
+    SearchResponse,
+)
 from .search import search_facilities
 
 
@@ -40,10 +49,27 @@ def get_facility(facility_uid: str) -> FacilityResponse:
     return FacilityResponse(facility_uid=facility_uid, record=record)
 
 
+@app.post("/validate-location", response_model=LocationValidationResponse)
+def post_validate_location(request: LocationValidationRequest) -> LocationValidationResponse:
+    return validate_location(request.location)
+
+
 @app.post("/search-facilities", response_model=SearchResponse)
 def post_search_facilities(request: SearchRequest) -> SearchResponse:
+    validation = validate_location(request.location)
+    if validation.is_valid_zip is False:
+        raise HTTPException(status_code=400, detail=validation.reason)
+    if validation.is_valid_zip is True and validation.is_la_county is False:
+        raise HTTPException(status_code=400, detail=validation.reason)
+
+    location_to_geocode = (
+        validation.normalized_location
+        if validation.is_valid_zip is True
+        else request.location
+    )
+
     try:
-        origin = geocode_location(request.location)
+        origin = geocode_location(location_to_geocode)
     except LocationGeocodingError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

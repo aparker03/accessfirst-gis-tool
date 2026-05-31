@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .directions import build_interactive_map_url
@@ -65,6 +66,125 @@ def insurance_note(record: dict[str, Any]) -> str | None:
     return "Insurance acceptance is not verified in the source data; call to confirm coverage."
 
 
+def source_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        values = value
+    elif isinstance(value, str):
+        values = re.split(r";|\|", value)
+    else:
+        values = []
+
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(text)
+    return cleaned
+
+
+def compact_list_summary(values: list[str], noun: str, limit: int = 4) -> str | None:
+    if not values:
+        return None
+
+    shown = values[:limit]
+    if len(values) == 1:
+        return f"{noun}: {shown[0]}."
+    if len(values) <= limit:
+        return f"{noun}: {readable_join(shown)}."
+    return f"{noun}: {readable_join(shown)}, and {len(values) - limit} more."
+
+
+def readable_join(values: list[str]) -> str:
+    if not values:
+        return ""
+    if len(values) == 1:
+        return values[0]
+    if len(values) == 2:
+        return f"{values[0]} and {values[1]}"
+    return f"{', '.join(values[:-1])}, and {values[-1]}"
+
+
+def parse_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        parsed = int(float(str(value).strip()))
+    except ValueError:
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def practitioner_count(record: dict[str, Any]) -> int | None:
+    explicit_count = parse_int(record.get("practitioner_count"))
+    if explicit_count is not None:
+        return explicit_count
+
+    practitioners = record.get("practitioners")
+    if isinstance(practitioners, list):
+        return len(practitioners)
+
+    names = source_list(record.get("practitioner_names"))
+    return len(names) if names else None
+
+
+def has_practitioner_names(record: dict[str, Any]) -> bool:
+    practitioners = record.get("practitioners")
+    if isinstance(practitioners, list):
+        return any(
+            str(item.get("practitioner_name", "")).strip()
+            for item in practitioners
+            if isinstance(item, dict)
+        )
+    return bool(source_list(record.get("practitioner_names")))
+
+
+def has_npi_or_license_details(record: dict[str, Any]) -> bool:
+    if source_list(record.get("npi_numbers")) or source_list(record.get("ca_licenses")):
+        return True
+
+    practitioners = record.get("practitioners")
+    if not isinstance(practitioners, list):
+        return False
+
+    return any(
+        (
+            str(item.get("npi_number", "")).strip()
+            or str(item.get("ca_license", "")).strip()
+        )
+        for item in practitioners
+        if isinstance(item, dict)
+    )
+
+
+def practitioner_summary(record: dict[str, Any], count: int | None, disciplines: list[str]) -> str | None:
+    if count is None and not disciplines and not has_practitioner_names(record):
+        return None
+
+    parts: list[str] = []
+    if count is not None:
+        label = "practitioner" if count == 1 else "practitioners"
+        parts.append(f"{count} {label} listed")
+    elif has_practitioner_names(record):
+        parts.append("Practitioner names listed")
+
+    if disciplines:
+        shown = disciplines[:4]
+        discipline_text = readable_join(shown)
+        if len(disciplines) > 4:
+            discipline_text = f"{discipline_text}, and {len(disciplines) - 4} more"
+        parts.append(f"disciplines include {discipline_text}")
+
+    if not parts:
+        return None
+    return f"{'; '.join(parts)}."
+
+
 def facility_result(
     record: dict[str, Any],
     request: SearchRequest,
@@ -76,6 +196,11 @@ def facility_result(
     mapbox = mapbox_object(record)
     longitude = float(mapbox["longitude"])
     latitude = float(mapbox["latitude"])
+    services = source_list(record.get("services"))
+    methods_of_delivery = source_list(record.get("methods_of_delivery"))
+    practice_focus_terms = source_list(record.get("practice_focus_terms"))
+    disciplines = source_list(record.get("practitioner_disciplines"))
+    count = practitioner_count(record)
 
     return FacilityResult(
         facility_uid=str(record.get("facility_uid", "")),
@@ -90,17 +215,21 @@ def facility_result(
         website=record.get("website"),
         email=record.get("email"),
         hours=record.get("hours"),
-        languages=record.get("languages") if isinstance(record.get("languages"), list) else [],
-        services=record.get("services") if isinstance(record.get("services"), list) else [],
-        methods_of_delivery=(
-            record.get("methods_of_delivery")
-            if isinstance(record.get("methods_of_delivery"), list)
-            else []
-        ),
+        languages=source_list(record.get("languages")),
+        services=services,
+        service_summary=compact_list_summary(services, "Services"),
+        methods_of_delivery=methods_of_delivery,
+        delivery_summary=compact_list_summary(methods_of_delivery, "Delivery options"),
         ada_facility=record.get("ada_facility"),
         accepting_status=record.get("accepting_status"),
         insurance_acceptance_verified=record.get("insurance_acceptance_verified"),
         insurance_note=insurance_note(record),
+        practice_focus_summary=compact_list_summary(practice_focus_terms, "Focus areas"),
+        practitioner_summary=practitioner_summary(record, count, disciplines),
+        practitioner_count=count,
+        practitioner_disciplines=disciplines,
+        has_practitioner_names=has_practitioner_names(record),
+        has_npi_or_license_details=has_npi_or_license_details(record),
         longitude=longitude,
         latitude=latitude,
         distance_miles=round(distance_miles, 2),

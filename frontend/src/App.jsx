@@ -443,9 +443,14 @@ function DetailPanel({ facility, origin, providerRecord, isDetailLoading, detail
     )
   }
 
+  const services = sourceList(providerRecord?.services)
+  const deliveryMethods = sourceList(providerRecord?.methods_of_delivery)
+  const careSetting = textValue(providerRecord?.care_setting)
   const focusAreas = sourceList(providerRecord?.practice_focus_terms)
   const disciplines = sourceList(providerRecord?.practitioner_disciplines)
   const practitioners = practitionerList(providerRecord)
+  const practitionerCount = practitionerCountValue(providerRecord)
+  const detailIsLoading = isDetailLoading && !providerRecord
 
   return (
     <aside className="detail-panel" aria-label="Facility details">
@@ -479,8 +484,17 @@ function DetailPanel({ facility, origin, providerRecord, isDetailLoading, detail
 
         <section>
           <h3>Services</h3>
-          <p>{listText(facility.services)}</p>
-          <p className="muted-text">{facility.care_setting || 'Care setting not listed'}</p>
+          <SourceList values={services} isLoading={detailIsLoading} error={detailError} />
+        </section>
+
+        <section>
+          <h3>Delivery methods</h3>
+          <SourceList values={deliveryMethods} isLoading={detailIsLoading} error={detailError} />
+        </section>
+
+        <section>
+          <h3>Care setting</h3>
+          <SourceText value={careSetting} isLoading={detailIsLoading} error={detailError} />
         </section>
 
         <section className="split-section">
@@ -495,23 +509,19 @@ function DetailPanel({ facility, origin, providerRecord, isDetailLoading, detail
         </section>
 
         <section>
-          <h3>Delivery options</h3>
-          <p>{listText(facility.methods_of_delivery)}</p>
-        </section>
-
-        <section>
           <h3>Focus areas</h3>
-          <SourceList values={focusAreas} isLoading={isDetailLoading && !providerRecord} error={detailError} />
+          <SourceList values={focusAreas} isLoading={detailIsLoading} error={detailError} />
         </section>
 
         <section>
           <h3>Provider disciplines</h3>
-          <SourceList values={disciplines} isLoading={isDetailLoading && !providerRecord} error={detailError} />
+          <SourceList values={disciplines} isLoading={detailIsLoading} error={detailError} />
         </section>
 
         <PractitionerSection
           practitioners={practitioners}
-          isLoading={isDetailLoading && !providerRecord}
+          practitionerCount={practitionerCount}
+          isLoading={detailIsLoading}
           error={detailError}
         />
 
@@ -546,6 +556,19 @@ function DetailPanel({ facility, origin, providerRecord, isDetailLoading, detail
   )
 }
 
+function SourceText({ value, isLoading, error }) {
+  if (isLoading) {
+    return <p className="muted-text">Loading source directory details.</p>
+  }
+  if (error) {
+    return <p className="muted-text">Source directory details could not be loaded.</p>
+  }
+  if (!value) {
+    return <p className="muted-text">Not listed in the source record.</p>
+  }
+  return <p>{value}</p>
+}
+
 function SourceList({ values, isLoading, error }) {
   if (isLoading) {
     return <p className="muted-text">Loading source directory details.</p>
@@ -565,7 +588,9 @@ function SourceList({ values, isLoading, error }) {
   )
 }
 
-function PractitionerSection({ practitioners, isLoading, error }) {
+function PractitionerSection({ practitioners, practitionerCount, isLoading, error }) {
+  const hasLongList = practitioners.length > 5
+
   return (
     <section>
       <h3>Practitioners listed in source directory</h3>
@@ -575,49 +600,62 @@ function PractitionerSection({ practitioners, isLoading, error }) {
       {isLoading && <p className="muted-text">Loading source directory details.</p>}
       {!isLoading && error && <p className="muted-text">Source directory details could not be loaded.</p>}
       {!isLoading && !error && !practitioners.length && (
-        <p className="muted-text">Not listed in the source record.</p>
+        <p className="muted-text">
+          {practitionerCount
+            ? `${practitionerCount} practitioners listed; names are not listed in the source record.`
+            : 'Not listed in the source record.'}
+        </p>
       )}
-      {!isLoading && !error && practitioners.length > 0 && (
+      {!isLoading && !error && practitioners.length > 0 && hasLongList && (
         <details className="practitioner-accordion">
           <summary>Show practitioner details ({practitioners.length})</summary>
-          <div className="practitioner-list">
-            {practitioners.map((practitioner, index) => (
-              <article className="practitioner-card" key={`${practitioner.practitioner_name || 'practitioner'}-${index}`}>
-                {practitioner.practitioner_name && (
-                  <h4>{practitioner.practitioner_name}</h4>
-                )}
-                <dl>
-                  {practitioner.discipline && (
-                    <div>
-                      <dt>Discipline</dt>
-                      <dd>{practitioner.discipline}</dd>
-                    </div>
-                  )}
-                  {practitioner.practice_focus && (
-                    <div>
-                      <dt>Practice focus</dt>
-                      <dd>{practitioner.practice_focus}</dd>
-                    </div>
-                  )}
-                  {practitioner.npi_number && (
-                    <div>
-                      <dt>NPI</dt>
-                      <dd>{practitioner.npi_number}</dd>
-                    </div>
-                  )}
-                  {practitioner.ca_license && (
-                    <div>
-                      <dt>CA license</dt>
-                      <dd>{practitioner.ca_license}</dd>
-                    </div>
-                  )}
-                </dl>
-              </article>
-            ))}
-          </div>
+          <PractitionerList practitioners={practitioners} />
         </details>
       )}
+      {!isLoading && !error && practitioners.length > 0 && !hasLongList && (
+        <PractitionerList practitioners={practitioners} isStandalone />
+      )}
     </section>
+  )
+}
+
+function PractitionerList({ practitioners, isStandalone = false }) {
+  return (
+    <div className={`practitioner-list ${isStandalone ? 'standalone' : ''}`}>
+      {practitioners.map((practitioner, index) => (
+        <article className="practitioner-card" key={`${practitioner.practitioner_name || 'practitioner'}-${index}`}>
+          {practitioner.practitioner_name && (
+            <h4>{practitioner.practitioner_name}</h4>
+          )}
+          <dl>
+            {practitioner.discipline && (
+              <div>
+                <dt>Discipline</dt>
+                <dd>{practitioner.discipline}</dd>
+              </div>
+            )}
+            {practitioner.practice_focus && (
+              <div>
+                <dt>Practice focus</dt>
+                <dd>{practitioner.practice_focus}</dd>
+              </div>
+            )}
+            {practitioner.npi_number && (
+              <div>
+                <dt>NPI</dt>
+                <dd>{practitioner.npi_number}</dd>
+              </div>
+            )}
+            {practitioner.ca_license && (
+              <div>
+                <dt>CA license</dt>
+                <dd>{practitioner.ca_license}</dd>
+              </div>
+            )}
+          </dl>
+        </article>
+      ))}
+    </div>
   )
 }
 
@@ -870,13 +908,31 @@ function sourceList(value) {
   const values = Array.isArray(value)
     ? value
     : typeof value === 'string'
-      ? value.split(';')
+      ? value.split(/[;|]/)
       : []
   return Array.from(new Set(
     values
       .map((item) => String(item || '').trim())
       .filter(Boolean),
   ))
+}
+
+function textValue(value) {
+  const text = String(value || '').trim()
+  return text || null
+}
+
+function practitionerCountValue(record) {
+  if (!record) return null
+  const parsedCount = Number(record.practitioner_count)
+  if (Number.isFinite(parsedCount) && parsedCount >= 0) {
+    return parsedCount
+  }
+  if (Array.isArray(record.practitioners)) {
+    return record.practitioners.length
+  }
+  const names = sourceList(record.practitioner_names)
+  return names.length || null
 }
 
 function practitionerList(record) {
@@ -897,10 +953,12 @@ function practitionerList(record) {
   const names = sourceList(record.practitioner_names)
   const npiNumbers = sourceList(record.npi_numbers)
   const caLicenses = sourceList(record.ca_licenses)
+  const disciplines = sourceList(record.practitioner_disciplines)
 
   return names
     .map((name, index) => cleanPractitioner({
       practitioner_name: name,
+      discipline: disciplines.length === 1 ? disciplines[0] : '',
       npi_number: npiNumbers[index],
       ca_license: caLicenses[index],
     }))
