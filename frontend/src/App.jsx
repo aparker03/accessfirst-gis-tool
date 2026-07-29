@@ -1,12 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import mapboxgl from 'mapbox-gl'
 import {
+  clearSearchStateFromUrl,
   getFacility,
   initialFacilityLinkFromUrl,
   initialFiltersFromUrl,
   searchFacilities,
   syncFiltersToUrl,
 } from './lib/api.js'
+import {
+  getInitialLanguage,
+  LANGUAGE_OPTIONS,
+  setInterfaceLanguage,
+  translate,
+} from './lib/i18n.js'
 
 const LOS_ANGELES_CENTER = [-118.2437, 34.0522]
 const DEFAULT_FILTERS = {
@@ -23,6 +30,10 @@ const DEFAULT_FILTERS = {
 }
 
 export default function App() {
+  const [uiLanguage, setUiLanguage] = useState(() => getInitialLanguage())
+  const [isSearchOpen, setIsSearchOpen] = useState(
+    () => window.matchMedia('(min-width: 1081px)').matches,
+  )
   const [filters, setFilters] = useState(() => initialFiltersFromUrl())
   const [response, setResponse] = useState(null)
   const [selectedFacilityUid, setSelectedFacilityUid] = useState(null)
@@ -32,11 +43,18 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
   const [mapReady, setMapReady] = useState(false)
+  const [detailRevealRequest, setDetailRevealRequest] = useState(0)
   const facilityLinkRef = useRef(initialFacilityLinkFromUrl())
   const mapContainerRef = useRef(null)
   const mapRef = useRef(null)
   const markersRef = useRef([])
   const originMarkerRef = useRef(null)
+  const mapBoundsKeyRef = useRef('')
+  const detailPanelRef = useRef(null)
+  const t = useMemo(
+    () => (key, values) => translate(uiLanguage, key, values),
+    [uiLanguage],
+  )
 
   const results = response?.results || []
   const selectedFacility = useMemo(
@@ -53,11 +71,18 @@ export default function App() {
       center: LOS_ANGELES_CENTER,
       zoom: 9,
       attributionControl: true,
+      scrollZoom: false,
     })
     mapRef.current.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right')
     mapRef.current.addControl(new mapboxgl.ScaleControl({ unit: 'imperial' }), 'bottom-right')
     mapRef.current.on('load', () => setMapReady(true))
   }, [])
+
+  useEffect(() => {
+    setInterfaceLanguage(uiLanguage)
+    document.documentElement.lang = uiLanguage
+    document.title = t('pageTitle')
+  }, [uiLanguage, t])
 
   useEffect(() => {
     const facilityLink = facilityLinkRef.current
@@ -82,9 +107,27 @@ export default function App() {
       selectedFacilityUid: selectedFacility?.facility_uid,
       markersRef,
       originMarkerRef,
-      onSelect: setSelectedFacilityUid,
+      mapBoundsKeyRef,
+      onSelect: handleFacilitySelect,
+      t,
     })
-  }, [results, response?.origin, selectedFacility?.facility_uid, mapReady])
+  }, [results, response?.origin, selectedFacility?.facility_uid, mapReady, t])
+
+  useEffect(() => {
+    if (!selectedFacility?.facility_uid || detailRevealRequest === 0) return
+    const panel = detailPanelRef.current
+    if (!panel) return
+
+    const bounds = panel.getBoundingClientRect()
+    const isOutsideViewport = bounds.top < 0 || bounds.bottom > window.innerHeight
+    if (isOutsideViewport) {
+      panel.scrollIntoView({
+        behavior: 'auto',
+        block: 'start',
+      })
+    }
+    panel.focus({ preventScroll: true })
+  }, [detailRevealRequest, selectedFacility?.facility_uid])
 
   useEffect(() => {
     if (!selectedFacility?.facility_uid) {
@@ -107,12 +150,13 @@ export default function App() {
       .then((data) => {
         if (isActive) {
           setSelectedFacilityRecord(data.record || null)
+          setDetailRevealRequest((current) => current + 1)
         }
       })
       .catch((detailFetchError) => {
         if (!isActive || detailFetchError.name === 'AbortError') return
         setSelectedFacilityRecord(null)
-        setDetailError(detailFetchError.message || 'Facility details could not be loaded.')
+        setDetailError('detailLoadFailed')
       })
       .finally(() => {
         if (isActive) setIsDetailLoading(false)
@@ -123,6 +167,16 @@ export default function App() {
       controller.abort()
     }
   }, [selectedFacility?.facility_uid])
+
+  function handleLanguageChange(event) {
+    const nextLanguage = setInterfaceLanguage(event.target.value)
+    setUiLanguage(nextLanguage)
+  }
+
+  function handleFacilitySelect(facilityUid) {
+    setSelectedFacilityUid(facilityUid)
+    setDetailRevealRequest((current) => current + 1)
+  }
 
   function updateFilter(key, value) {
     setFilters((current) => ({ ...current, [key]: value }))
@@ -135,12 +189,12 @@ export default function App() {
     setSelectedFacilityRecord(null)
     setDetailError('')
     setError('')
-    window.history.replaceState(null, '', window.location.pathname)
+    clearSearchStateFromUrl()
   }
 
   async function runSearch(nextFilters, options = {}) {
     if (!nextFilters.location.trim()) {
-      setError('Enter a location to search nearby facilities.')
+      setError(t('enterLocation'))
       setResponse(null)
       return
     }
@@ -161,6 +215,7 @@ export default function App() {
         ? data.results?.find((facility) => facility.facility_uid === requestedFacilityUid)
         : null
 
+      setError('')
       setResponse(data)
       if (matchedFacility) {
         setSelectedFacilityUid(matchedFacility.facility_uid)
@@ -178,7 +233,7 @@ export default function App() {
       } else {
         setResponse(null)
         setSelectedFacilityUid(null)
-        setError(searchError.message || 'Search failed.')
+        setError(t('searchFailed'))
       }
     } finally {
       setIsLoading(false)
@@ -200,24 +255,30 @@ export default function App() {
       })
 
       if (!facility) {
-        throw new Error('Facility was found, but it does not include usable coordinates.')
+        throw new Error(t('unusableCoordinates'))
       }
 
+      setError('')
       setResponse({
         query: filters,
         origin,
-        origin_place_name: options.fallbackOriginPlaceName || (origin ? 'Map link origin' : null),
+        origin_place_name: options.fallbackOriginPlaceName || (origin ? t('mapLinkOrigin') : null),
         count: 1,
-        message: 'Loaded facility from map link.',
+        message: t('loadedFromLink'),
         results: [facility],
       })
       setSelectedFacilityUid(facility.facility_uid)
       setSelectedFacilityRecord(data.record || null)
+      setDetailRevealRequest((current) => current + 1)
     } catch (facilityError) {
       setResponse(null)
       setSelectedFacilityUid(null)
       setSelectedFacilityRecord(null)
-      setError(facilityError.message || 'Facility link could not be loaded.')
+      setError(
+        facilityError.message === t('unusableCoordinates')
+          ? facilityError.message
+          : t('facilityLinkFailed'),
+      )
     } finally {
       setIsLoading(false)
     }
@@ -230,50 +291,64 @@ export default function App() {
 
   return (
     <main className="app-shell">
-      <section className="filter-bar" aria-label="Facility search filters">
+      <section className="filter-bar" aria-label={t('facilitySearchFilters')}>
         <div className="brand-block">
-          <p className="eyebrow">AccessFirst GIS</p>
-          <h1>Facility Finder</h1>
+          <div>
+            <p className="eyebrow">AccessFirst GIS</p>
+            <h1>{t('facilityFinder')}</h1>
+          </div>
+          <label className="language-selector">
+            <span>{t('interfaceLanguage')}</span>
+            <select value={uiLanguage} onChange={handleLanguageChange}>
+              {LANGUAGE_OPTIONS.map((option) => (
+                <option value={option.value} key={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
         </div>
-        <details className="search-panel" open>
-          <summary>Search filters</summary>
+        <details
+          className="search-panel"
+          open={isSearchOpen}
+          onToggle={(event) => setIsSearchOpen(event.currentTarget.open)}
+        >
+          <summary aria-label={t('searchFilters')}>{t('searchFilters')}</summary>
           <form className="search-form" onSubmit={handleSubmit}>
             <div className="primary-fields">
               <label className="field field-location">
-                <span>Location</span>
+                <span>{t('location')}</span>
                 <input
                   value={filters.location}
                   onChange={(event) => updateFilter('location', event.target.value)}
-                  placeholder="Address, city, or ZIP"
+                  placeholder={t('locationPlaceholder')}
                   autoComplete="street-address"
                 />
               </label>
               <label className="field">
-                <span>Service type</span>
+                <span>{t('serviceType')}</span>
                 <input
                   value={filters.service_type}
                   onChange={(event) => updateFilter('service_type', event.target.value)}
-                  placeholder="Therapy, medication, crisis"
+                  placeholder={t('servicePlaceholder')}
                 />
               </label>
               <label className="field">
-                <span>Language</span>
+                <span>{t('language')}</span>
                 <input
                   value={filters.language}
                   onChange={(event) => updateFilter('language', event.target.value)}
-                  placeholder="Spanish"
+                  placeholder={t('languagePlaceholder')}
                 />
               </label>
               <label className="field">
-                <span>Accessibility</span>
+                <span>{t('accessibility')}</span>
                 <input
                   value={filters.accessibility_need}
                   onChange={(event) => updateFilter('accessibility_need', event.target.value)}
-                  placeholder="ADA, wheelchair"
+                  placeholder={t('accessibilityPlaceholder')}
                 />
               </label>
               <label className="field select-field">
-                <span>Telehealth</span>
+                <span>{t('telehealth')}</span>
                 <select
                   value={filters.telehealth === null || filters.telehealth === undefined ? 'any' : String(filters.telehealth)}
                   onChange={(event) => {
@@ -281,13 +356,13 @@ export default function App() {
                     updateFilter('telehealth', value === 'any' ? null : value === 'true')
                   }}
                 >
-                  <option value="any">Any</option>
-                  <option value="false">In person</option>
-                  <option value="true">Telehealth</option>
+                  <option value="any">{t('any')}</option>
+                  <option value="false">{t('inPerson')}</option>
+                  <option value="true">{t('telehealth')}</option>
                 </select>
               </label>
               <label className="field compact">
-                <span>Radius</span>
+                <span>{t('radius')}</span>
                 <input
                   type="number"
                   min="1"
@@ -297,7 +372,7 @@ export default function App() {
                 />
               </label>
               <label className="field compact">
-                <span>Limit</span>
+                <span>{t('limit')}</span>
                 <input
                   type="number"
                   min="1"
@@ -308,17 +383,17 @@ export default function App() {
               </label>
               <div className="form-actions">
                 <button className="primary-button" type="submit" disabled={isLoading}>
-                  {isLoading ? 'Searching' : 'Search'}
+                  {isLoading ? t('searching') : t('search')}
                 </button>
                 <button className="secondary-button" type="button" onClick={clearFilters}>
-                  Clear filters
+                  {t('clearFilters')}
                 </button>
               </div>
             </div>
 
             <fieldset className="advanced-filters">
-              <legend>Data quality filters</legend>
-              <p>Default results show verified LA County map records.</p>
+              <legend>{t('dataQualityFilters')}</legend>
+              <p>{t('verifiedDefault')}</p>
               <div className="advanced-toggle-grid">
                 <label>
                   <input
@@ -326,7 +401,7 @@ export default function App() {
                     checked={filters.include_warning_results}
                     onChange={(event) => updateFilter('include_warning_results', event.target.checked)}
                   />
-                  Include minor location warnings
+                  {t('includeWarnings')}
                 </label>
                 <label>
                   <input
@@ -334,7 +409,7 @@ export default function App() {
                     checked={filters.include_manual_review}
                     onChange={(event) => updateFilter('include_manual_review', event.target.checked)}
                   />
-                  Include records needing location review
+                  {t('includeManualReview')}
                 </label>
                 <label>
                   <input
@@ -342,7 +417,7 @@ export default function App() {
                     checked={filters.include_outside_la_county}
                     onChange={(event) => updateFilter('include_outside_la_county', event.target.checked)}
                   />
-                  Include outside-LA records
+                  {t('includeOutside')}
                 </label>
               </div>
             </fieldset>
@@ -351,20 +426,20 @@ export default function App() {
       </section>
 
       <section className="workspace">
-        <aside className="results-panel" aria-label="Ranked facility results">
+        <aside className="results-panel" aria-label={t('rankedResults')}>
           <div className="panel-header">
             <div>
-              <h2>Results</h2>
-              <p>{resultSummary(response, isLoading, error)}</p>
+              <h2>{t('results')}</h2>
+              <p>{resultSummary(response, isLoading, error, t)}</p>
             </div>
           </div>
-          {isLoading && <LoadingState />}
-          {!isLoading && error && <NoticeState title="Search needs attention" message={error} />}
+          {isLoading && <LoadingState t={t} />}
+          {!isLoading && error && <NoticeState title={t('searchAttention')} message={error} />}
           {!isLoading && !error && !response && (
-            <NoticeState title="Start with a location" message="Search from an address, city, or ZIP to find nearby facilities." />
+            <NoticeState title={t('startLocation')} message={t('startLocationMessage')} />
           )}
           {!isLoading && response && results.length === 0 && (
-            <NoticeState title="No matching facilities" message={response.message || 'Try a larger radius or fewer filters.'} />
+            <NoticeState title={t('noMatches')} message={t('noMatchesMessage')} />
           )}
           <div className="facility-list">
             {results.map((facility, index) => (
@@ -373,35 +448,48 @@ export default function App() {
                 facility={facility}
                 rank={index + 1}
                 isSelected={facility.facility_uid === selectedFacility?.facility_uid}
-                onSelect={() => setSelectedFacilityUid(facility.facility_uid)}
+                onSelect={() => handleFacilitySelect(facility.facility_uid)}
+                t={t}
               />
             ))}
           </div>
         </aside>
 
-        <section className="map-region" aria-label="Facility map">
+        <section className="map-region" aria-label={t('map')}>
           <div className="map-container" ref={mapContainerRef}>
             {!mapboxgl.accessToken && (
               <div className="map-overlay">
-                <strong>Mapbox token missing</strong>
-                <span>Set VITE_MAPBOX_PUBLIC_TOKEN in frontend/.env.</span>
+                <strong>{t('mapTokenMissing')}</strong>
+                <span>{t('mapTokenInstruction')}</span>
               </div>
             )}
           </div>
-          <DetailPanel
-            facility={selectedFacility}
-            origin={response?.origin_place_name}
-            providerRecord={selectedFacilityRecord}
-            isDetailLoading={isDetailLoading}
-            detailError={detailError}
-          />
+          <p className="map-instruction" role="note">{t('mapInstruction')}</p>
+          {selectedFacility && (
+            <button
+              className="view-details-button"
+              type="button"
+              onClick={() => handleFacilitySelect(selectedFacility.facility_uid)}
+            >
+              {t('viewDetails')}
+            </button>
+          )}
         </section>
+        <DetailPanel
+          detailRef={detailPanelRef}
+          facility={selectedFacility}
+          origin={response?.origin_place_name}
+          providerRecord={selectedFacilityRecord}
+          isDetailLoading={isDetailLoading}
+          detailError={detailError}
+          t={t}
+        />
       </section>
     </main>
   )
 }
 
-function FacilityCard({ facility, rank, isSelected, onSelect }) {
+function FacilityCard({ facility, rank, isSelected, onSelect, t }) {
   const cardServices = facility.services?.slice(0, 2) || []
   const cardLanguages = facility.languages?.slice(0, 2) || []
 
@@ -410,19 +498,21 @@ function FacilityCard({ facility, rank, isSelected, onSelect }) {
       className={`facility-card ${isSelected ? 'selected' : ''}`}
       type="button"
       onClick={onSelect}
-      aria-label={`Select ${facility.facility_name || facility.provider_display_name}`}
+      aria-label={t('selectFacility', {
+        name: facility.facility_name || facility.provider_display_name,
+      })}
     >
       <span className="rank-marker">{rank}</span>
       <span className="card-main">
         <span className="facility-name">{facility.facility_name || facility.provider_display_name}</span>
-        <span className="facility-distance">{formatDistance(facility.distance_miles)}</span>
+        <span className="facility-distance">{formatDistance(facility.distance_miles, t)}</span>
         <span className="facility-meta">{facility.address || `${facility.city || ''} ${facility.zip_code || ''}`}</span>
-        <span className="facility-meta">{facility.phone || 'Phone not listed'}</span>
+        <span className="facility-meta">{facility.phone || t('phoneNotListed')}</span>
         <span className="facility-meta">
-          {cardServices.length ? cardServices.join(', ') : facility.care_setting || 'Services not listed'}
+          {cardServices.length ? cardServices.join(', ') : facility.care_setting || t('servicesNotListed')}
         </span>
         <span className="badge-row">
-          <span className={`badge ${mapStatusClass(facility)}`}>{mapStatusLabel(facility)}</span>
+          <span className={`badge ${mapStatusClass(facility)}`}>{mapStatusLabel(facility, t)}</span>
           {facility.ada_facility === 'yes' && <span className="badge success">ADA</span>}
           {cardLanguages.map((language) => (
             <span className="badge neutral" key={language}>{language}</span>
@@ -433,12 +523,25 @@ function FacilityCard({ facility, rank, isSelected, onSelect }) {
   )
 }
 
-function DetailPanel({ facility, origin, providerRecord, isDetailLoading, detailError }) {
+function DetailPanel({
+  detailRef,
+  facility,
+  origin,
+  providerRecord,
+  isDetailLoading,
+  detailError,
+  t,
+}) {
   if (!facility) {
     return (
-      <aside className="detail-panel empty" aria-label="Facility details">
-        <h2>Facility details</h2>
-        <p>Select a result or run a search to inspect facility details.</p>
+      <aside
+        className="detail-panel empty"
+        aria-label={t('facilityDetails')}
+        ref={detailRef}
+        tabIndex="-1"
+      >
+        <h2>{t('facilityDetails')}</h2>
+        <p>{t('facilityDetailsEmpty')}</p>
       </aside>
     )
   }
@@ -453,69 +556,74 @@ function DetailPanel({ facility, origin, providerRecord, isDetailLoading, detail
   const detailIsLoading = isDetailLoading && !providerRecord
 
   return (
-    <aside className="detail-panel" aria-label="Facility details">
+    <aside
+      className="detail-panel"
+      aria-label={t('facilityDetails')}
+      ref={detailRef}
+      tabIndex="-1"
+    >
       <div className="detail-heading">
         <div>
-          <p className="eyebrow">{facility.service_area || 'Service area not listed'}</p>
+          <p className="eyebrow">{facility.service_area || t('serviceAreaNotListed')}</p>
           <h2>{facility.facility_name || facility.provider_display_name}</h2>
         </div>
-        <span className={`badge ${mapStatusClass(facility)}`}>{mapStatusLabel(facility)}</span>
+        <span className={`badge ${mapStatusClass(facility)}`}>{mapStatusLabel(facility, t)}</span>
       </div>
-      <p className="distance-line">{distanceFromText(facility.distance_miles, origin)}</p>
+      <p className="distance-line">{distanceFromText(facility.distance_miles, origin, t)}</p>
 
       <div className="detail-sections">
         <section>
-          <h3>Contact</h3>
+          <h3>{t('contact')}</h3>
           <dl className="detail-grid">
             <div>
-              <dt>Address</dt>
-              <dd>{facility.address || 'Not listed'}</dd>
+              <dt>{t('address')}</dt>
+              <dd>{facility.address || t('notListed')}</dd>
             </div>
             <div>
-              <dt>Phone</dt>
-              <dd>{facility.phone || 'Not listed'}</dd>
+              <dt>{t('phone')}</dt>
+              <dd>{facility.phone || t('notListed')}</dd>
             </div>
             <div>
-              <dt>Hours</dt>
-              <dd>{facility.hours || 'Not listed'}</dd>
+              <dt>{t('hours')}</dt>
+              <dd>{facility.hours || t('notListed')}</dd>
             </div>
           </dl>
         </section>
 
         <section>
-          <h3>Services</h3>
-          <SourceList values={services} isLoading={detailIsLoading} error={detailError} />
+          <h3>{t('services')}</h3>
+          <SourceList values={services} isLoading={detailIsLoading} error={detailError} t={t} />
         </section>
 
         <section>
-          <h3>Delivery methods</h3>
-          <SourceList values={deliveryMethods} isLoading={detailIsLoading} error={detailError} />
+          <h3>{t('deliveryMethods')}</h3>
+          <SourceList values={deliveryMethods} isLoading={detailIsLoading} error={detailError} t={t} />
         </section>
 
         <section>
-          <h3>Care setting</h3>
-          <SourceText value={careSetting} isLoading={detailIsLoading} error={detailError} />
+          <h3>{t('careSetting')}</h3>
+          <SourceText value={careSetting} isLoading={detailIsLoading} error={detailError} t={t} />
         </section>
 
         <section className="split-section">
           <div>
-            <h3>Languages</h3>
-            <p>{listText(facility.languages)}</p>
+            <h3>{t('languages')}</h3>
+            <p>{listText(facility.languages, t)}</p>
           </div>
           <div>
-            <h3>Accessibility</h3>
-            <p>{facility.ada_facility === 'yes' ? 'ADA facility listed' : facility.ada_facility || 'Not listed'}</p>
+            <h3>{t('accessibility')}</h3>
+            <p>{facility.ada_facility === 'yes' ? t('adaListed') : facility.ada_facility || t('notListed')}</p>
           </div>
         </section>
 
         <section>
-          <h3>Focus areas</h3>
-          <SourceList values={focusAreas} isLoading={detailIsLoading} error={detailError} />
+          <h3>{t('focusAreas')}</h3>
+          <SourceList values={focusAreas} isLoading={detailIsLoading} error={detailError} t={t} />
         </section>
 
         <section>
-          <h3>Provider disciplines</h3>
-          <SourceList values={disciplines} isLoading={detailIsLoading} error={detailError} />
+          <h3>{t('providerDisciplines')}</h3>
+          <SourceList values={disciplines} isLoading={detailIsLoading} error={detailError} t={t} />
         </section>
 
         <PractitionerSection
@@ -523,32 +631,35 @@ function DetailPanel({ facility, origin, providerRecord, isDetailLoading, detail
           practitionerCount={practitionerCount}
           isLoading={detailIsLoading}
           error={detailError}
+          t={t}
         />
 
         <section>
-          <h3>Location quality</h3>
-          <p>{mapStatusLabel(facility)}</p>
-          <p className="muted-text">{facility.map_inclusion_reason || 'Map location reviewed.'}</p>
+          <h3>{t('locationQuality')}</h3>
+          <p>{mapStatusLabel(facility, t)}</p>
+          <p className="muted-text">{facility.map_inclusion_reason || t('reviewedLocation')}</p>
         </section>
 
         <section className="directions-box">
-          <h3>Open directions</h3>
-          <p>For turn-by-turn directions, open this location in your preferred maps app.</p>
+          <h3>{t('openDirections')}</h3>
+          <p>{t('directionsHelp')}</p>
           <a
             className="directions-link"
             href={directionsHref(facility)}
             target="_blank"
             rel="noreferrer"
-            aria-label={`Open directions to ${facility.facility_name || 'selected facility'}`}
+            aria-label={t('directionsTo', {
+              name: facility.facility_name || t('selectedFacility'),
+            })}
           >
-            Open directions
+            {t('openDirections')}
           </a>
         </section>
 
         <section>
-          <h3>Coverage note</h3>
+          <h3>{t('coverageNote')}</h3>
           <p className="insurance-note">
-            {facility.insurance_note || insuranceStatusText(facility)}
+            {insuranceStatusText(facility, t)}
           </p>
         </section>
       </div>
@@ -556,31 +667,31 @@ function DetailPanel({ facility, origin, providerRecord, isDetailLoading, detail
   )
 }
 
-function SourceText({ value, isLoading, error }) {
+function SourceText({ value, isLoading, error, t }) {
   if (isLoading) {
-    return <p className="muted-text">Loading source directory details.</p>
+    return <p className="muted-text">{t('loadingSource')}</p>
   }
   if (error) {
-    return <p className="muted-text">Source directory details could not be loaded.</p>
+    return <p className="muted-text">{t('sourceLoadFailed')}</p>
   }
   if (!value) {
-    return <p className="muted-text">Not listed in the source record.</p>
+    return <p className="muted-text">{t('sourceNotListed')}</p>
   }
   return <p>{value}</p>
 }
 
-function SourceList({ values, isLoading, error }) {
+function SourceList({ values, isLoading, error, t }) {
   if (isLoading) {
-    return <p className="muted-text">Loading source directory details.</p>
+    return <p className="muted-text">{t('loadingSource')}</p>
   }
   if (error) {
-    return <p className="muted-text">Source directory details could not be loaded.</p>
+    return <p className="muted-text">{t('sourceLoadFailed')}</p>
   }
   if (!values.length) {
-    return <p className="muted-text">Not listed in the source record.</p>
+    return <p className="muted-text">{t('sourceNotListed')}</p>
   }
   return (
-    <div className="chip-list" aria-label="Source directory values">
+    <div className="chip-list" aria-label={t('sourceValues')}>
       {values.map((value) => (
         <span className="chip" key={value}>{value}</span>
       ))}
@@ -588,38 +699,38 @@ function SourceList({ values, isLoading, error }) {
   )
 }
 
-function PractitionerSection({ practitioners, practitionerCount, isLoading, error }) {
+function PractitionerSection({ practitioners, practitionerCount, isLoading, error, t }) {
   const hasLongList = practitioners.length > 5
 
   return (
     <section>
-      <h3>Practitioners listed in source directory</h3>
-      <p className="source-note">
-        Practitioner listings come from the source provider directory and may not reflect current availability. Call to confirm.
-      </p>
-      {isLoading && <p className="muted-text">Loading source directory details.</p>}
-      {!isLoading && error && <p className="muted-text">Source directory details could not be loaded.</p>}
+      <h3>{t('practitioners')}</h3>
+      <p className="source-note">{t('practitionerNotice')}</p>
+      {isLoading && <p className="muted-text">{t('loadingSource')}</p>}
+      {!isLoading && error && <p className="muted-text">{t('sourceLoadFailed')}</p>}
       {!isLoading && !error && !practitioners.length && (
         <p className="muted-text">
           {practitionerCount
-            ? `${practitionerCount} practitioners listed; names are not listed in the source record.`
-            : 'Not listed in the source record.'}
+            ? t('practitionerCountOnly', { count: practitionerCount })
+            : t('sourceNotListed')}
         </p>
       )}
       {!isLoading && !error && practitioners.length > 0 && hasLongList && (
         <details className="practitioner-accordion">
-          <summary>Show practitioner details ({practitioners.length})</summary>
-          <PractitionerList practitioners={practitioners} />
+          <summary aria-label={t('showPractitioners', { count: practitioners.length })}>
+            {t('showPractitioners', { count: practitioners.length })}
+          </summary>
+          <PractitionerList practitioners={practitioners} t={t} />
         </details>
       )}
       {!isLoading && !error && practitioners.length > 0 && !hasLongList && (
-        <PractitionerList practitioners={practitioners} isStandalone />
+        <PractitionerList practitioners={practitioners} isStandalone t={t} />
       )}
     </section>
   )
 }
 
-function PractitionerList({ practitioners, isStandalone = false }) {
+function PractitionerList({ practitioners, isStandalone = false, t }) {
   return (
     <div className={`practitioner-list ${isStandalone ? 'standalone' : ''}`}>
       {practitioners.map((practitioner, index) => (
@@ -630,13 +741,13 @@ function PractitionerList({ practitioners, isStandalone = false }) {
           <dl>
             {practitioner.discipline && (
               <div>
-                <dt>Discipline</dt>
+                <dt>{t('discipline')}</dt>
                 <dd>{practitioner.discipline}</dd>
               </div>
             )}
             {practitioner.practice_focus && (
               <div>
-                <dt>Practice focus</dt>
+                <dt>{t('practiceFocus')}</dt>
                 <dd>{practitioner.practice_focus}</dd>
               </div>
             )}
@@ -648,7 +759,7 @@ function PractitionerList({ practitioners, isStandalone = false }) {
             )}
             {practitioner.ca_license && (
               <div>
-                <dt>CA license</dt>
+                <dt>{t('caLicense')}</dt>
                 <dd>{practitioner.ca_license}</dd>
               </div>
             )}
@@ -659,12 +770,12 @@ function PractitionerList({ practitioners, isStandalone = false }) {
   )
 }
 
-function LoadingState() {
+function LoadingState({ t }) {
   return (
     <div className="state-block" role="status">
       <span className="spinner" aria-hidden="true" />
-      <strong>Searching nearby facilities</strong>
-      <p>Resolving the location and ranking eligible provider records.</p>
+      <strong>{t('searchingNearby')}</strong>
+      <p>{t('searchingNearbyMessage')}</p>
     </div>
   )
 }
@@ -678,18 +789,18 @@ function NoticeState({ title, message }) {
   )
 }
 
-function mapStatusLabel(facility) {
+function mapStatusLabel(facility, t) {
   if (facility.geography_status === 'outside_la_county') {
-    return 'Outside LA County'
+    return t('outsideCounty')
   }
   if (
     facility.map_inclusion_status === 'include_with_warning'
     || facility.geocode_quality_status === 'verified_city_or_zip_mismatch'
     || facility.geocode_quality_status === 'needs_review_address'
   ) {
-    return 'Location needs confirmation'
+    return t('needsConfirmation')
   }
-  return 'Verified location'
+  return t('verifiedLocation')
 }
 
 function mapStatusClass(facility) {
@@ -706,15 +817,15 @@ function mapStatusClass(facility) {
   return 'success'
 }
 
-function distanceFromText(distanceMiles, origin) {
-  const distance = formatDistance(distanceMiles)
-  if (distance === 'Distance not calculated') {
+function distanceFromText(distanceMiles, origin, t) {
+  const distance = formatDistance(distanceMiles, t)
+  if (!Number.isFinite(Number(distanceMiles))) {
     return distance
   }
-  if (origin && origin !== 'Map link origin') {
-    return `${distance} from ${origin}`
+  if (origin) {
+    return t('distanceFrom', { distance, origin })
   }
-  return `${distance} from search location`
+  return t('distanceFromSearch', { distance })
 }
 
 function directionsHref(facility) {
@@ -723,11 +834,11 @@ function directionsHref(facility) {
   )}`
 }
 
-function insuranceStatusText(facility) {
+function insuranceStatusText(facility, t) {
   if (String(facility.insurance_acceptance_verified || '').toLowerCase() === 'yes') {
-    return 'Insurance acceptance is marked verified in the source data. Call to confirm current eligibility and availability.'
+    return t('insuranceVerified')
   }
-  return 'Insurance acceptance is not verified in the source data; call to confirm coverage.'
+  return t('insuranceUnverified')
 }
 
 function facilityFromProviderRecord(record, { facilityLink, origin }) {
@@ -763,7 +874,6 @@ function facilityFromProviderRecord(record, { facilityLink, origin }) {
     ada_facility: record.ada_facility || null,
     accepting_status: record.accepting_status || null,
     insurance_acceptance_verified: record.insurance_acceptance_verified || null,
-    insurance_note: insuranceNote(record),
     longitude,
     latitude,
     distance_miles: distance === null ? null : Number(distance.toFixed(2)),
@@ -791,19 +901,12 @@ function parseCoordinate(value) {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-function insuranceNote(record) {
-  if (String(record.insurance_acceptance_verified || '').toLowerCase() === 'yes') {
-    return null
-  }
-  return 'Insurance acceptance is not verified in the source data; call to confirm coverage.'
-}
-
-function formatDistance(distanceMiles) {
+function formatDistance(distanceMiles, t) {
   const distance = Number(distanceMiles)
   if (!Number.isFinite(distance)) {
-    return 'Distance not calculated'
+    return t('distanceNotCalculated')
   }
-  return `${distance} mi`
+  return t('miles', { distance })
 }
 
 function haversineMiles(originLongitude, originLatitude, destinationLongitude, destinationLatitude) {
@@ -825,7 +928,17 @@ function toRadians(value) {
   return value * Math.PI / 180
 }
 
-function renderMapResults({ map, results, origin, selectedFacilityUid, markersRef, originMarkerRef, onSelect }) {
+function renderMapResults({
+  map,
+  results,
+  origin,
+  selectedFacilityUid,
+  markersRef,
+  originMarkerRef,
+  mapBoundsKeyRef,
+  onSelect,
+  t,
+}) {
   if (!map) return
 
   markersRef.current.forEach((marker) => marker.remove())
@@ -843,7 +956,7 @@ function renderMapResults({ map, results, origin, selectedFacilityUid, markersRe
   if (origin?.longitude && origin?.latitude) {
     const originElement = document.createElement('div')
     originElement.className = 'origin-marker'
-    originElement.setAttribute('aria-label', 'Search origin')
+    originElement.setAttribute('aria-label', t('searchOrigin'))
     originMarkerRef.current = new mapboxgl.Marker({ element: originElement })
       .setLngLat([origin.longitude, origin.latitude])
       .addTo(map)
@@ -855,12 +968,16 @@ function renderMapResults({ map, results, origin, selectedFacilityUid, markersRe
     element.className = `pin-marker ${facility.facility_uid === selectedFacilityUid ? 'selected' : ''}`
     element.type = 'button'
     element.textContent = String(index + 1)
-    element.setAttribute('aria-label', `Select ${facility.facility_name || 'facility'} result ${index + 1}`)
+    element.setAttribute('aria-label', t('selectResult', {
+      name: facility.facility_name || facility.provider_display_name || t('selectedFacility'),
+      rank: index + 1,
+    }))
     element.addEventListener('click', () => onSelect(facility.facility_uid))
 
     const marker = new mapboxgl.Marker({ element })
       .setLngLat([facility.longitude, facility.latitude])
       .addTo(map)
+    element.setAttribute('role', 'button')
     markersRef.current.push(marker)
     bounds.extend([facility.longitude, facility.latitude])
   })
@@ -892,16 +1009,30 @@ function renderMapResults({ map, results, origin, selectedFacilityUid, markersRe
     })
   }
 
-  if (!bounds.isEmpty()) {
-    map.fitBounds(bounds, { padding: 84, maxZoom: 13, duration: 700 })
+  const boundsKey = JSON.stringify({
+    origin: origin ? [origin.longitude, origin.latitude] : null,
+    results: results.map((facility) => [
+      facility.facility_uid,
+      facility.longitude,
+      facility.latitude,
+    ]),
+  })
+  if (!bounds.isEmpty() && boundsKey !== mapBoundsKeyRef.current) {
+    mapBoundsKeyRef.current = boundsKey
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    map.fitBounds(bounds, {
+      padding: 84,
+      maxZoom: 13,
+      duration: prefersReducedMotion ? 0 : 700,
+    })
   }
 }
 
-function resultSummary(response, isLoading, error) {
-  if (isLoading) return 'Loading'
-  if (error) return 'Unable to complete search'
-  if (!response) return 'Awaiting search'
-  return `${response.count} facilities ranked`
+function resultSummary(response, isLoading, error, t) {
+  if (isLoading) return t('loading')
+  if (error) return t('unableSearch')
+  if (!response) return t('awaitingSearch')
+  return t('facilitiesRanked', { count: response.count })
 }
 
 function sourceList(value) {
@@ -971,6 +1102,6 @@ function cleanPractitioner(practitioner) {
   )
 }
 
-function listText(values) {
-  return values?.length ? values.join(', ') : 'Not listed'
+function listText(values, t) {
+  return values?.length ? values.join(', ') : t('notListed')
 }

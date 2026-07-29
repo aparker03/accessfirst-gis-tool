@@ -28,7 +28,9 @@ export function initialFacilityLinkFromUrl() {
 }
 
 export function syncFiltersToUrl(filters) {
-  const params = new URLSearchParams()
+  const params = new URLSearchParams(window.location.search)
+  SEARCH_PARAM_KEYS.forEach((key) => params.delete(key))
+  FACILITY_PARAM_KEYS.forEach((key) => params.delete(key))
   setParam(params, 'location', filters.location)
   setParam(params, 'service_type', filters.service_type)
   setParam(params, 'language', filters.language)
@@ -49,8 +51,18 @@ export function syncFiltersToUrl(filters) {
   }
 
   const nextUrl = params.toString()
-    ? `${window.location.pathname}?${params.toString()}`
-    : window.location.pathname
+    ? `${window.location.pathname}?${params.toString()}${window.location.hash}`
+    : `${window.location.pathname}${window.location.hash}`
+  window.history.replaceState(null, '', nextUrl)
+}
+
+export function clearSearchStateFromUrl() {
+  const params = new URLSearchParams(window.location.search)
+  SEARCH_PARAM_KEYS.forEach((key) => params.delete(key))
+  FACILITY_PARAM_KEYS.forEach((key) => params.delete(key))
+  const nextUrl = params.toString()
+    ? `${window.location.pathname}?${params.toString()}${window.location.hash}`
+    : `${window.location.pathname}${window.location.hash}`
   window.history.replaceState(null, '', nextUrl)
 }
 
@@ -124,3 +136,25 @@ function parseOptionalNumber(value) {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : null
 }
+
+const SEARCH_PARAM_KEYS = [
+  'location',
+  'service_type',
+  'language',
+  'accessibility_need',
+  'telehealth',
+  'radius',
+  'radius_miles',
+  'limit',
+  'include_warning_results',
+  'include_manual_review',
+  'include_outside_la_county',
+]
+
+const FACILITY_PARAM_KEYS = [
+  'facility_uid',
+  'provider_lng',
+  'provider_lat',
+  'origin_lng',
+  'origin_lat',
+]
