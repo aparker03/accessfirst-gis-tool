@@ -71,7 +71,7 @@ export default function App() {
       center: LOS_ANGELES_CENTER,
       zoom: 9,
       attributionControl: true,
-      scrollZoom: false,
+      cooperativeGestures: true,
     })
     mapRef.current.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right')
     mapRef.current.addControl(new mapboxgl.ScaleControl({ unit: 'imperial' }), 'bottom-right')
