@@ -66,6 +66,16 @@ export function clearSearchStateFromUrl() {
   window.history.replaceState(null, '', nextUrl)
 }
 
+export function syncSelectedFacilityToUrl(facilityUid, { replace = false } = {}) {
+  const params = new URLSearchParams(window.location.search)
+  FACILITY_PARAM_KEYS.forEach((key) => params.delete(key))
+  setParam(params, 'facility_uid', facilityUid)
+  const nextUrl = params.toString()
+    ? `${window.location.pathname}?${params.toString()}${window.location.hash}`
+    : `${window.location.pathname}${window.location.hash}`
+  window.history[replace ? 'replaceState' : 'pushState'](null, '', nextUrl)
+}
+
 export async function searchFacilities(filters, signal) {
   const response = await fetch(`${API_BASE_URL}/search-facilities`, {
     method: 'POST',

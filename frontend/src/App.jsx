@@ -7,6 +7,7 @@ import {
   initialFiltersFromUrl,
   searchFacilities,
   syncFiltersToUrl,
+  syncSelectedFacilityToUrl,
 } from './lib/api.js'
 import {
   getInitialLanguage,
@@ -90,7 +91,6 @@ export default function App() {
       runSearch(filters, {
         syncUrl: false,
         selectFacilityUid: facilityLink.facility_uid,
-        fallbackFacilityLink: facilityLink,
       })
     } else if (facilityLink.facility_uid) {
       loadFacilityLink(facilityLink)
@@ -98,6 +98,56 @@ export default function App() {
       runSearch(filters)
     }
   }, [])
+
+  useEffect(() => {
+    function handlePopState() {
+      const nextFilters = initialFiltersFromUrl()
+      const facilityLink = initialFacilityLinkFromUrl()
+      const nextLanguage = getInitialLanguage()
+
+      setUiLanguage(nextLanguage)
+      setFilters(nextFilters)
+      facilityLinkRef.current = facilityLink
+
+      if (nextFilters.location && response && filtersEqual(filters, nextFilters)) {
+        const matchedFacility = facilityLink.facility_uid
+          ? results.find((facility) => facility.facility_uid === facilityLink.facility_uid)
+          : null
+        const nextFacilityUid = matchedFacility?.facility_uid || results[0]?.facility_uid || null
+
+        setSelectedFacilityUid(nextFacilityUid)
+        if (facilityLink.facility_uid) {
+          syncSelectedFacilityToUrl(matchedFacility?.facility_uid || null, { replace: true })
+        }
+        if (nextFacilityUid) {
+          setDetailRevealRequest((current) => current + 1)
+        }
+        return
+      }
+
+      if (nextFilters.location) {
+        runSearch(nextFilters, {
+          syncUrl: false,
+          selectFacilityUid: facilityLink.facility_uid,
+        })
+        return
+      }
+
+      if (facilityLink.facility_uid) {
+        loadFacilityLink(facilityLink)
+        return
+      }
+
+      setResponse(null)
+      setSelectedFacilityUid(null)
+      setSelectedFacilityRecord(null)
+      setDetailError('')
+      setError('')
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [filters, response, results])
 
   useEffect(() => {
     renderMapResults({
@@ -174,6 +224,9 @@ export default function App() {
   }
 
   function handleFacilitySelect(facilityUid) {
+    if (facilityUid !== selectedFacilityUid) {
+      syncSelectedFacilityToUrl(facilityUid)
+    }
     setSelectedFacilityUid(facilityUid)
     setDetailRevealRequest((current) => current + 1)
   }
@@ -219,22 +272,17 @@ export default function App() {
       setResponse(data)
       if (matchedFacility) {
         setSelectedFacilityUid(matchedFacility.facility_uid)
-      } else if (requestedFacilityUid && options.fallbackFacilityLink) {
-        await loadFacilityLink(options.fallbackFacilityLink, {
-          fallbackOrigin: data.origin,
-          fallbackOriginPlaceName: data.origin_place_name,
-        })
+        syncSelectedFacilityToUrl(matchedFacility.facility_uid, { replace: true })
       } else {
         setSelectedFacilityUid(data.results?.[0]?.facility_uid || null)
+        if (requestedFacilityUid) {
+          syncSelectedFacilityToUrl(null, { replace: true })
+        }
       }
     } catch (searchError) {
-      if (options.fallbackFacilityLink) {
-        await loadFacilityLink(options.fallbackFacilityLink)
-      } else {
-        setResponse(null)
-        setSelectedFacilityUid(null)
-        setError(t('searchFailed'))
-      }
+      setResponse(null)
+      setSelectedFacilityUid(null)
+      setError(t('searchFailed'))
     } finally {
       setIsLoading(false)
     }
@@ -270,10 +318,12 @@ export default function App() {
       setSelectedFacilityUid(facility.facility_uid)
       setSelectedFacilityRecord(data.record || null)
       setDetailRevealRequest((current) => current + 1)
+      syncSelectedFacilityToUrl(facility.facility_uid, { replace: true })
     } catch (facilityError) {
       setResponse(null)
       setSelectedFacilityUid(null)
       setSelectedFacilityRecord(null)
+      syncSelectedFacilityToUrl(null, { replace: true })
       setError(
         facilityError.message === t('unusableCoordinates')
           ? facilityError.message
@@ -899,6 +949,10 @@ function originFromLink(facilityLink) {
 function parseCoordinate(value) {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : null
+}
+
+function filtersEqual(left, right) {
+  return Object.keys(DEFAULT_FILTERS).every((key) => left[key] === right[key])
 }
 
 function formatDistance(distanceMiles, t) {
